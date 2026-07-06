@@ -684,8 +684,9 @@ def parse_tables(sql: str, database: str | None = None) -> list[TableBlock]:
             # 只在该块内提取 INSERT 数据
             _parse_inserts(block_sql, table_name, block)
 
-            tables.append(block)
-            table_map[table_name] = block
+            if table_name not in table_map:
+                tables.append(block)
+                table_map[table_name] = block
 
         # 第二遍：查找没有 DROP TABLE 的孤儿 CREATE TABLE
         _parse_orphan_tables(sql, table_map, tables, database)
@@ -736,8 +737,9 @@ def parse_tables(sql: str, database: str | None = None) -> list[TableBlock]:
             _parse_columns_and_constraints(table_body, block)
             _parse_inserts(block_sql, table_name, block)
 
-            tables.append(block)
-            table_map[table_name] = block
+            if table_name not in table_map:
+                tables.append(block)
+                table_map[table_name] = block
 
     _parse_standalone_fks(sql, table_map)
     _parse_standalone_indexes(sql, table_map)
