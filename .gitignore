@@ -1,0 +1,14 @@
+# 项目内部文档，不入库
+docs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时/中间产物
+*.tmp
+tests/actual.sql
+
+# SDD 进度账本（脚手架产物，不入库）
+.superpowers/
