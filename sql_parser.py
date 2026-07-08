@@ -528,6 +528,40 @@ def _parse_value_row(row_str: str) -> list[str]:
     return values
 
 
+# 匹配 COMMENT ON TABLE "xxx" IS 'yyy'
+_COMMENT_ON_TABLE_PAT = re.compile(
+    r"""COMMENT\s+ON\s+TABLE\s+(?:`(\w+)`|"(\w+)"|(\w+))\s+IS\s+'([^']*)'\s*;?""",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# 匹配 COMMENT ON COLUMN "xxx"."yyy" IS 'zzz'
+_COMMENT_ON_COL_PAT = re.compile(
+    r"""COMMENT\s+ON\s+COLUMN\s+(?:`(\w+)`|"(\w+)"|(\w+))\s*\.\s*(?:`(\w+)`|"(\w+)"|(\w+))\s+IS\s+'([^']*)'\s*;?""",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_comment_on(sql: str, table_map: dict[str, TableBlock]) -> None:
+    """解析 COMMENT ON TABLE / COMMENT ON COLUMN 语句，补充注释到 TableBlock。"""
+    # 表注释
+    for m in _COMMENT_ON_TABLE_PAT.finditer(sql):
+        table_name = m.group(1) or m.group(2) or m.group(3)
+        comment = m.group(4)
+        if table_name in table_map:
+            table_map[table_name].comment = comment
+
+    # 列注释
+    for m in _COMMENT_ON_COL_PAT.finditer(sql):
+        table_name = m.group(1) or m.group(2) or m.group(3)
+        col_name = m.group(4) or m.group(5) or m.group(6)
+        comment = m.group(7)
+        if table_name in table_map:
+            for col in table_map[table_name].columns:
+                if col.name == col_name:
+                    col.comment = comment
+                    break
+
+
 def _parse_standalone_fks(sql: str, table_map: dict[str, TableBlock]) -> None:
     """解析独立的 ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY 语句。"""
     for m in _ALTER_FK_PAT.finditer(sql):
@@ -762,6 +796,7 @@ def parse_tables(sql: str, database: str | None = None) -> list[TableBlock]:
 
     _parse_standalone_fks(sql, table_map)
     _parse_standalone_indexes(sql, table_map)
+    _parse_comment_on(sql, table_map)
 
     return tables
 
