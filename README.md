@@ -1,81 +1,111 @@
 # sql_convert
 
-MySQL → KingbaseES（MySQL 兼容模式）SQL 转换器。
+多方言 SQL 转换器。支持 MySQL、Oracle、PostgreSQL、Kingbase、SQLite 之间的双向转换。
 
-将 mysqldump 导出的 `.sql` 文件转换为可直接导入 Kingbase 的 SQL。基于正则规则引擎，零第三方依赖。
+基于 Dialect + Capability + Rule Engine 架构，新增数据库仅需声明方言能力，无需修改规则。
 
 ## 环境要求
 
-- Python 3.10 或更高
+- Python 3.10+
 
 ## 用法
 
 ```bash
-python convert.py <input.sql> [-o OUTPUT] [--mode {mysql}]
-                              [--encoding ENC] [--overwrite] [-v]
+python convert.py <input.sql> --source-mode <SOURCE> --target-mode <TARGET>
+                   [-o OUTPUT] [--encoding ENC] [--overwrite] [-v]
+                   [--database DB]
 ```
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `input` | 必填 | 待转换的 mysqldump `.sql` 文件路径 |
-| `-o, --output` | `<input 主名>_convert.<扩展>`，同目录 | 输出文件路径 |
-| `--mode` | `mysql` | Kingbase 兼容模式，当前仅支持 `mysql` |
-| `--encoding` | `utf-8` | 读写文件编码。若源文件为 GBK，用 `--encoding gbk` |
+| `input` | 必填 | 待转换的 `.sql` 文件路径 |
+| `--source-mode` | 必填 | 源数据库类型：`mysql`、`oracle`、`kingbase`、`pgsql`、`sqlite` |
+| `--target-mode` | 必填 | 目标数据库类型：`mysql`、`kingbase`、`pgsql`、`sqlite` |
+| `-o, --output` | `<input>_<target>_<时间戳>.<扩展>` | 输出文件路径 |
+| `--encoding` | `utf-8` | 读写文件编码 |
 | `--overwrite` | 关 | 输出文件已存在时是否覆盖 |
 | `-v, --verbose` | 关 | 打印每条规则命中次数 |
+| `--database` | 无 | 数据库名，用于输出中表标识符的前缀 |
 
 ### 示例
 
 ```bash
-# 基本用法：输出到 dump_convert.sql
-python convert.py dump.sql
+# MySQL → Kingbase
+python convert.py dump.sql --source-mode mysql --target-mode kingbase
 
-# 指定输出并覆盖
-python convert.py dump.sql -o out.sql --overwrite
+# MySQL → PostgreSQL
+python convert.py dump.sql --source-mode mysql --target-mode pgsql
 
-# 查看每条规则的命中统计
-python convert.py dump.sql -v
+# MySQL → SQLite（直接生成 .db 文件）
+python convert.py dump.sql --source-mode mysql --target-mode sqlite
 
-# GBK 编码的源文件
-python convert.py dump.sql --encoding gbk
+# Oracle → PostgreSQL
+python convert.py dump.sql --source-mode oracle --target-mode pgsql
+
+# Kingbase → MySQL（反向转换）
+python convert.py kingbase_output.sql --source-mode kingbase --target-mode mysql
+
+# 指定输出并查看规则命中
+python convert.py dump.sql --source-mode mysql --target-mode kingbase -o out.sql -v
+
+# GBK 编码
+python convert.py dump.sql --source-mode mysql --target-mode kingbase --encoding gbk
 ```
 
 ### 退出码
 
 - `0`：成功
-- `2`：使用错误（参数、路径、权限）
-- `3`：运行时错误（编码、IO、规则异常）
+- `2`：使用错误
+- `3`：运行时错误
 
-## 当前支持的转换规则
+## 输出格式
 
-首批共 9 条，覆盖 mysqldump 输出中 Kingbase MySQL 模式不支持的常见语法：
+转换输出为 5 步骤结构化 SQL：
 
-1. 剔除 `/*!40101 ... */` 版本条件注释
-2. 删除 `LOCK TABLES` / `UNLOCK TABLES` 行
-3. 删除 `SET @OLD_...` / `SET @@...` 会话变量
-4. 删除表级 `ENGINE=xxx`
-5. 删除表级 `DEFAULT CHARSET` / `CHARACTER SET` / `COLLATE`
-6. 删除表级 `AUTO_INCREMENT=N` 起始值（列级 `AUTO_INCREMENT` 保留）
-7. 删除 `ROW_FORMAT` / `KEY_BLOCK_SIZE` 等表选项
-8. 删除列定义中的 `CHARACTER SET` / `COLLATE`
-9. 展开 `DELIMITER $$ ... $$ DELIMITER ;` 块
+1. 删除旧表（`DROP TABLE IF EXISTS ...`）
+2. 表结构（`CREATE TABLE ...`）
+3. 索引（`CREATE INDEX ...`）
+4. 外键（`ALTER TABLE ADD CONSTRAINT ...`）
+5. 数据导入（`INSERT INTO ... VALUES ...`）
 
-**数据安全底线：** 所有规则均设置 `skip_insert=True`，`INSERT INTO` 数据行绝对不会被修改。
+输出按外键依赖拓扑排序，确保导入顺序正确。
 
-## 新增规则
+## 架构
 
-在 `rules.py` 的 `RULES` 列表末尾追加条目，主流程无需改动。字段说明见文件顶部 docstring。
-
-## 手动验证
-
-```bash
-python convert.py tests/sample_input.sql -o tests/actual.sql --overwrite
-diff tests/actual.sql tests/sample_output.sql
-rm tests/actual.sql
+```
+Dialect（方言自我描述）
+  └─ Capability（能力标签）
+       └─ Rule Engine（正则规则 + Pipeline）
+            └─ Canonical Mapping（类型 + 函数映射）
 ```
 
-`diff` 无输出即通过。
+- **Dialect**：每个数据库声明自身能力（`capabilities`），不关心其他数据库
+- **Rule**：源有某能力、目标无 → 自动执行规则，无需为每个目标重复编写
+- **Pipeline**：规则按 6 个阶段顺序执行，避免冲突
+- **Canonical Mapping**：类型和函数通过中间规范层转发（`Source Type → Canonical → Target Type`）
 
-## 真实数据验证
+## 支持的语言
 
-用真实 mysqldump 文件跑一遍 `convert.py`，把输出导入 Kingbase；如出现导入报错，把对应语法补进 `RULES` 并回归 `tests/sample_input.sql`。
+| 方言 | 别名 | 支持方向 |
+|---|---|---|
+| MySQL | `mysql` | 源 + 目标 |
+| Oracle | `oracle` | 源 |
+| PostgreSQL | `pgsql`、`postgresql`、`postgres` | 源 + 目标 |
+| KingbaseES | `kingbase` | 源 + 目标 |
+| SQLite | `sqlite`、`sqlite3` | 源 + 目标 |
+
+## 新增方言
+
+在 `converter/dialects/` 下新建文件，继承 `BaseDialect`，声明 `family`、`capabilities`、映射表：
+
+```python
+@register
+class NewDialect(BaseDialect):
+    family = "pg"
+    identifier_quote = '"'
+    capabilities = {CAP_CASCADE, ...}
+    canonical_to_type = {"Integer32": "INTEGER", ...}
+    canonical_to_function = {"Coalesce": "COALESCE", ...}
+```
+
+规则文件无需修改。
