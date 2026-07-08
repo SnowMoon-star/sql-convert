@@ -11,7 +11,7 @@ DROP TABLE IF EXISTS "test_oracle" CASCADE;
 -- 步骤2: 表结构
 -- --------------------------------------------
 CREATE TABLE "test_oracle" (
-  "id" INTEGER NOT NULL,
+  "id" NUMERIC NOT NULL,
   "desc" TEXT
 );
 

@@ -39,6 +39,30 @@ class MysqlDialect(BaseDialect):
         CAP_TYPE_BIT, CAP_TYPE_BIT_LITERAL,
     }
 
+    type_to_canonical: dict[str, str] = {
+        "tinyint": "Integer8", "smallint": "Integer16",
+        "mediumint": "Integer32", "int": "Integer32", "integer": "Integer32",
+        "bigint": "Integer64", "float": "Real32", "double": "Real64",
+        "decimal": "Decimal", "numeric": "Decimal",
+        "varchar": "Text", "char": "Text", "tinytext": "Text",
+        "mediumtext": "Text", "longtext": "Text", "text": "Text",
+        "datetime": "DateTime", "timestamp": "DateTime",
+        "date": "Date", "time": "Time", "year": "Integer16",
+        "blob": "Blob", "tinyblob": "Blob", "mediumblob": "Blob", "longblob": "Blob",
+        "binary": "Blob", "varbinary": "Blob",
+        "enum": "Enum", "set": "Set", "bit": "Bit",
+        "bool": "Boolean", "boolean": "Boolean",
+    }
+
+    function_to_canonical: dict[str, str] = {
+        "NOW()": "CurrentTimestamp", "CURDATE()": "CurrentDate",
+        "CURTIME()": "CurrentTime", "IFNULL": "Coalesce",
+        "CONCAT_WS": "ConcatWs", "GROUP_CONCAT": "GroupConcat",
+        "DATE_FORMAT": "DateFormat", "STR_TO_DATE": "StrToDate",
+        "UNIX_TIMESTAMP": "UnixTimestamp", "FROM_UNIXTIME": "FromUnixtime",
+        "UUID()": "Uuid", "LENGTH": "Length", "CHAR_LENGTH": "CharLength",
+    }
+
     def quote_identifier(self, name: str) -> str:
         return f"`{name}`"
 

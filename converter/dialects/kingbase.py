@@ -25,6 +25,32 @@ class KingbaseDialect(BaseDialect):
         CAP_TYPE_EXTENSION, CAP_TYPE_PG_TYPE_CAST,
     }
 
+    canonical_to_type: dict[str, str] = {
+        "Integer8": "SMALLINT", "Integer16": "SMALLINT",
+        "Integer32": "INTEGER", "Integer64": "BIGINT",
+        "Real32": "REAL", "Real64": "DOUBLE PRECISION",
+        "Decimal": "NUMERIC", "Text": "TEXT",
+        "DateTime": "TIMESTAMP", "Date": "DATE", "Time": "TIME",
+        "Blob": "BYTEA", "Enum": "VARCHAR(255)", "Set": "VARCHAR(255)",
+        "Bit": "SMALLINT", "Boolean": "BOOLEAN",
+    }
+
+    canonical_to_function: dict[str, str] = {
+        "CurrentTimestamp": "CURRENT_TIMESTAMP",
+        "CurrentDate": "CURRENT_DATE",
+        "CurrentTime": "CURRENT_TIME",
+        "Coalesce": "COALESCE",
+        "ConcatWs": "CONCAT_WS",
+        "GroupConcat": "STRING_AGG",
+        "DateFormat": "TO_CHAR",
+        "StrToDate": "TO_DATE",
+        "UnixTimestamp": "EXTRACT(EPOCH FROM NOW())",
+        "FromUnixtime": "TO_TIMESTAMP",
+        "Uuid": "GEN_RANDOM_UUID()",
+        "Length": "LENGTH",
+        "CharLength": "CHAR_LENGTH",
+    }
+
     def quote_identifier(self, name: str) -> str:
         # 使用符合 SQL 标准的双引号
         return f'"{name}"'

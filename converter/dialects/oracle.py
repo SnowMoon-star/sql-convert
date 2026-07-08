@@ -25,6 +25,25 @@ class OracleDialect(BaseDialect):
         CAP_TYPE_ORACLE_DATE,
     }
 
+    type_to_canonical: dict[str, str] = {
+        "varchar2": "Text", "nvarchar2": "Text", "varchar": "Text",
+        "nvarchar": "Text", "char": "Text", "nchar": "Text",
+        "clob": "Text", "nclob": "Text", "long": "Text",
+        "number": "Decimal", "float": "Real64",
+        "date": "DateTime", "timestamp": "DateTime",
+        "blob": "Blob", "raw": "Blob", "long raw": "Blob",
+        "rowid": "Text",
+    }
+
+    function_to_canonical: dict[str, str] = {
+        "SYSDATE": "CurrentTimestamp",
+        "SYSTIMESTAMP": "CurrentTimestamp",
+        "NVL": "Coalesce",
+        "TO_CHAR": "DateFormat",
+        "TO_DATE": "StrToDate",
+        "LENGTH": "Length",
+    }
+
     def quote_identifier(self, name: str) -> str:
         return f'"{name}"'
 

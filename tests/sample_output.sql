@@ -12,7 +12,7 @@ DROP TABLE IF EXISTS "users" CASCADE;
 -- --------------------------------------------
 CREATE TABLE "users" (
   "id" INTEGER NOT NULL AUTO_INCREMENT,
-  "name" VARCHAR(64) NOT NULL,
+  "name" TEXT NOT NULL,
   PRIMARY KEY ("id")
 );
 
@@ -51,7 +51,7 @@ DROP TABLE IF EXISTS "settings" CASCADE;
 -- 步骤2: 表结构
 -- --------------------------------------------
 CREATE TABLE "settings" (
-  "key" VARCHAR(128) NOT NULL,
+  "key" TEXT NOT NULL,
   "value" TEXT NULL,
   PRIMARY KEY ("key")
 );

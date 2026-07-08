@@ -10,6 +10,14 @@ class BaseDialect:
     identifier_quote: str = '"'   # 标识符包围符
     capabilities: set[str] = set()  # 该方言支持的能力标签
 
+    # 类型映射表（子类覆盖）
+    type_to_canonical: dict[str, str] = {}
+    canonical_to_type: dict[str, str] = {}
+
+    # 函数映射表（子类覆盖）
+    function_to_canonical: dict[str, str] = {}
+    canonical_to_function: dict[str, str] = {}
+
     def __init__(self, database: str | None = None):
         self.database = database
 

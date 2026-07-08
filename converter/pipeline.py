@@ -65,6 +65,8 @@ class Pipeline:
     def run(self, text: str, source: BaseDialect, target: BaseDialect
             ) -> tuple[str, dict[str, int]]:
         counters: dict[str, int] = {}
+
+        # 阶段1-6: Rule-based 规则阶段
         for stage in self.stages:
             for rule in stage:
                 if not rule_applies(rule, source, target):
@@ -94,4 +96,15 @@ class Pipeline:
                 else:
                     text, n = _apply_line(text, rule)
                 counters[rule.name] = counters.get(rule.name, 0) + n
+
+        # 阶段7: 类型映射（Canonical Type Mapping，在所有 Rule 之后运行）
+        from converter.mappings.types import map_types
+        text, n = map_types(text, source, target)
+        counters["_type_mapping"] = counters.get("_type_mapping", 0) + n
+
+        # 阶段8: 函数映射（Canonical Function Mapping）
+        from converter.mappings.functions import map_functions
+        text, n = map_functions(text, source, target)
+        counters["_func_mapping"] = counters.get("_func_mapping", 0) + n
+
         return text, counters

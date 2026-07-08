@@ -27,6 +27,27 @@ class SqliteDialect(BaseDialect):
         CAP_DOUBLE_QUOTE, CAP_TYPE_AUTOINCREMENT, CAP_TYPE_BLOB,
     }
 
+    canonical_to_type: dict[str, str] = {
+        "Integer8": "INTEGER", "Integer16": "INTEGER",
+        "Integer32": "INTEGER", "Integer64": "INTEGER",
+        "Real32": "REAL", "Real64": "REAL",
+        "Decimal": "REAL", "Text": "TEXT",
+        "DateTime": "TEXT", "Date": "TEXT", "Time": "TEXT",
+        "Blob": "BLOB", "Enum": "TEXT", "Set": "TEXT",
+        "Bit": "INTEGER", "Boolean": "INTEGER",
+    }
+
+    canonical_to_function: dict[str, str] = {
+        "CurrentTimestamp": "CURRENT_TIMESTAMP",
+        "CurrentDate": "DATE('now')",
+        "CurrentTime": "TIME('now')",
+        "Coalesce": "IFNULL",
+        "Uuid": "lower(hex(randomblob(16)))",
+        "Length": "LENGTH",
+        "CharLength": "LENGTH",
+        "GroupConcat": "GROUP_CONCAT",
+    }
+
     def quote_identifier(self, name: str) -> str:
         return f'"{name}"'
 
