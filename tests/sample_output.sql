@@ -1,25 +1,25 @@
 -- ============================================
--- 表名: `users` 开始
+-- 表名: "users" 开始
 -- ============================================
 
 -- --------------------------------------------
 -- 步骤1: 删除旧表
 -- --------------------------------------------
-DROP TABLE IF EXISTS `users` CASCADE;
+DROP TABLE IF EXISTS "users" CASCADE;
 
 -- --------------------------------------------
 -- 步骤2: 表结构
 -- --------------------------------------------
-CREATE TABLE `users` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `name` VARCHAR(64) NOT NULL,
-  PRIMARY KEY (`id`)
+CREATE TABLE "users" (
+  "id" INTEGER NOT NULL AUTO_INCREMENT,
+  "name" VARCHAR(64) NOT NULL,
+  PRIMARY KEY ("id")
 );
 
 -- --------------------------------------------
 -- 步骤3: 索引
 -- --------------------------------------------
-ALTER TABLE `users` ADD UNIQUE KEY `idx_name` (`name`);
+CREATE UNIQUE INDEX "idx_name" ON "users" ("name");
 
 -- --------------------------------------------
 -- 步骤4: 外键
@@ -29,32 +29,34 @@ ALTER TABLE `users` ADD UNIQUE KEY `idx_name` (`name`);
 -- --------------------------------------------
 -- 步骤5: 数据导入
 -- --------------------------------------------
-INSERT INTO `users` VALUES
+INSERT INTO "users" VALUES
 (1, 'alice');
-INSERT INTO `users` VALUES
+INSERT INTO "users" VALUES
 (2, 'ENGINE=InnoDB is inside data, must NOT be stripped');
 
 -- ============================================
--- 表名: `users` 结束
+-- 表名: "users" 结束
 -- ============================================
 
 -- ============================================
--- 表名: `settings` 开始
+-- 表名: "settings" 开始
 -- ============================================
 
 -- --------------------------------------------
 -- 步骤1: 删除旧表
 -- --------------------------------------------
-DROP TABLE IF EXISTS `settings` CASCADE;
+DROP TABLE IF EXISTS "settings" CASCADE;
 
 -- --------------------------------------------
 -- 步骤2: 表结构
 -- --------------------------------------------
-CREATE TABLE `settings` (
-  `key` VARCHAR(128) NOT NULL,
-  `value` TEXT NULL COMMENT '配置值',
-  PRIMARY KEY (`key`)
+CREATE TABLE "settings" (
+  "key" VARCHAR(128) NOT NULL,
+  "value" TEXT NULL,
+  PRIMARY KEY ("key")
 );
+
+COMMENT ON COLUMN "settings"."value" IS '配置值';
 
 -- --------------------------------------------
 -- 步骤3: 索引
@@ -73,26 +75,26 @@ CREATE TABLE `settings` (
 
 
 -- ============================================
--- 表名: `settings` 结束
+-- 表名: "settings" 结束
 -- ============================================
 
 -- ============================================
--- 表名: `profiles` 开始
+-- 表名: "profiles" 开始
 -- ============================================
 
 -- --------------------------------------------
 -- 步骤1: 删除旧表
 -- --------------------------------------------
-DROP TABLE IF EXISTS `profiles` CASCADE;
+DROP TABLE IF EXISTS "profiles" CASCADE;
 
 -- --------------------------------------------
 -- 步骤2: 表结构
 -- --------------------------------------------
-CREATE TABLE `profiles` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `user_id` INT NOT NULL,
-  `active` smallint NULL DEFAULT NULL,
-  PRIMARY KEY (`id`)
+CREATE TABLE "profiles" (
+  "id" INTEGER NOT NULL AUTO_INCREMENT,
+  "user_id" INTEGER NOT NULL,
+  "active" SMALLINT NULL DEFAULT NULL,
+  PRIMARY KEY ("id")
 );
 
 -- --------------------------------------------
@@ -103,14 +105,14 @@ CREATE TABLE `profiles` (
 -- --------------------------------------------
 -- 步骤4: 外键
 -- --------------------------------------------
-ALTER TABLE `profiles` ADD CONSTRAINT `fk_profiles_users` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+ALTER TABLE "profiles" ADD CONSTRAINT "fk_profiles_users" FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
 -- --------------------------------------------
 -- 步骤5: 数据导入
 -- --------------------------------------------
-INSERT INTO `profiles` VALUES
+INSERT INTO "profiles" VALUES
 (1, 1, '1');
 
 -- ============================================
--- 表名: `profiles` 结束
+-- 表名: "profiles" 结束
 -- ============================================

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import dataclass, field
 
 
@@ -257,16 +258,23 @@ def _split_by_top_level_commas(body: str) -> list[str]:
 
 
 def _find_matching_paren(text: str, start: int) -> int:
-    """从 start 位置（'(' 的位置）开始，找到匹配的 ')' 位置。"""
+    """从 start 位置（'(' 的位置）开始，找到匹配的 ')' 位置。
+
+    使用 while 循环以支持转义字符双步跳跃（i += 2），
+    避免 `\'` 等转义序列错误翻转引号状态。
+    """
     depth = 0
     in_single = False
     in_double = False
     in_backtick = False
 
-    for i in range(start, len(text)):
+    i = start
+    while i < len(text):
         ch = text[i]
 
-        if ch == '\\':
+        # 转义字符：跳过自身及下一个字符，防止 \' 翻转引号状态
+        if ch == '\\' and (in_single or in_double):
+            i += 2
             continue
 
         if ch == "'" and not in_double and not in_backtick:
@@ -281,6 +289,8 @@ def _find_matching_paren(text: str, start: int) -> int:
             depth -= 1
             if depth == 0:
                 return i
+
+        i += 1
 
     return -1  # 未找到匹配
 
@@ -437,7 +447,9 @@ def _parse_inserts(sql: str, table_name: str, block: TableBlock) -> None:
 def _split_insert_values(values_str: str) -> list[list[str]]:
     """将 INSERT VALUES 部分解析为二维值列表。
 
-    处理多行格式: (v1, v2),\n(v3, v4)
+    处理多行格式: (v1, v2),\n(v3, v4)。
+    使用 while 循环以支持转义字符双步跳跃（i += 2），
+    避免 `\'` 等转义序列错误翻转引号状态。
     """
     rows: list[list[str]] = []
     depth = 0
@@ -445,8 +457,13 @@ def _split_insert_values(values_str: str) -> list[list[str]]:
     in_double = False
     start = -1
 
-    for i, ch in enumerate(values_str):
-        if ch == '\\':
+    i = 0
+    while i < len(values_str):
+        ch = values_str[i]
+
+        # 转义字符：跳过自身及下一个字符，防止 \' 翻转引号状态
+        if ch == '\\' and (in_single or in_double):
+            i += 2
             continue
 
         if ch == "'" and not in_double:
@@ -463,6 +480,8 @@ def _split_insert_values(values_str: str) -> list[list[str]]:
                 row_str = values_str[start:i]
                 rows.append(_parse_value_row(row_str))
                 start = -1
+
+        i += 1
 
     return rows
 
@@ -755,6 +774,7 @@ def _topological_sort(deps: dict[str, list[str]]) -> list[str]:
     """Kahn 拓扑排序：deps[name] = [该表所依赖的其他表]。
 
     返回表名列表，无依赖者在前。循环依赖或外部引用时保持原顺序。
+    使用 deque.popleft() 代替 list.pop(0)，将队列操作从 O(n) 降为 O(1)。
     """
     # 入度
     in_degree: dict[str, int] = {name: 0 for name in deps}
@@ -767,12 +787,12 @@ def _topological_sort(deps: dict[str, list[str]]) -> list[str]:
                 dependents[ref].append(name)
                 in_degree[name] += 1
 
-    # 入度为 0 的入队
-    queue = [n for n, d in in_degree.items() if d == 0]
+    # 入度为 0 的入队（deque 保证 popleft 为 O(1)）
+    queue: deque[str] = deque(n for n, d in in_degree.items() if d == 0)
     result: list[str] = []
 
     while queue:
-        name = queue.pop(0)
+        name = queue.popleft()
         result.append(name)
         for dependent in dependents.get(name, []):
             if dependent in in_degree:

@@ -10,5 +10,15 @@ __pycache__/
 *.tmp
 tests/actual.sql
 
+# 开发产物
+.claude/
+.codegraph/
+.vscode/
+
+
 # SDD 进度账本（脚手架产物，不入库）
 .superpowers/
+
+# AI Memory
+.ai_memory/
+

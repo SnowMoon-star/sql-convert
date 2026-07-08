@@ -9,31 +9,125 @@
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 
-from rules import RULES
+from converter.registry import get_dialect
+from converter.dialects.base import BaseDialect
+from converter.pipeline import Pipeline
+from converter.rules import ALL_STAGES
 from sql_parser import parse_tables, sort_tables_by_fk
+
+_pipeline = Pipeline(ALL_STAGES)
 
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_RUNTIME = 3
 
 
-def default_output_path(input_path: Path) -> Path:
-    """在 input 同目录生成 <主名>_convert.<扩展>；无扩展名则直接追加 _convert。"""
+def default_output_path(input_path: Path, target_mode: str) -> Path:
+    """在 input 同目录生成 <主名>_<target-mode>_<时间戳>.<扩展>。"""
+    import datetime
     stem = input_path.stem
     suffix = input_path.suffix
-    return input_path.with_name(f"{stem}_convert{suffix}")
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return input_path.with_name(f"{stem}_{target_mode}_{ts}{suffix}")
+
+
+# MySQL 专属特征
+_MYSQL_SNIFF_PATS = [
+    re.compile(r"`\w+`"),  # 反引号包围的标识符
+    re.compile(r"\bENGINE\s*=\s*\w+", re.IGNORECASE),
+    re.compile(r"\bAUTO_INCREMENT\s*=\s*\d+", re.IGNORECASE),
+    re.compile(r"\bDEFAULT\s+CHARSET\s*=", re.IGNORECASE),
+]
+
+# Oracle 专属特征
+_ORACLE_SNIFF_PATS = [
+    re.compile(r"\bVARCHAR2\b", re.IGNORECASE),
+    re.compile(r"\bNUMBER\b", re.IGNORECASE),
+    re.compile(r"\bROWNUM\b", re.IGNORECASE),
+    re.compile(r"\bSYSDATE\b", re.IGNORECASE),
+]
+
+# Kingbase 专属特征
+_KINGBASE_SNIFF_PATS = [
+    re.compile(r"\bWITHOUT\s+SYSTEM\s+OIDS\b", re.IGNORECASE),
+    re.compile(r"\bWITHOUT\s+OIDS\b", re.IGNORECASE),
+]
+
+# PostgreSQL 专属特征
+_PGSQL_SNIFF_PATS = [
+    re.compile(r"::\w+"),  # ::type 类型转换
+    re.compile(r"\bSERIAL\b", re.IGNORECASE),  # SERIAL / BIGSERIAL
+    re.compile(r"\bILIKE\b", re.IGNORECASE),
+    re.compile(r"\bRETURNING\b", re.IGNORECASE),
+    re.compile(r"\bpg_catalog\b", re.IGNORECASE),
+    re.compile(r"\bCREATE\s+EXTENSION\b", re.IGNORECASE),
+]
+
+# SQLite 专属特征
+_SQLITE_SNIFF_PATS = [
+    re.compile(r"\bPRAGMA\b", re.IGNORECASE),
+    re.compile(r"\bsqlite_\w+\b", re.IGNORECASE),
+    re.compile(r"\bWITHOUT\s+ROWID\b", re.IGNORECASE),
+    re.compile(r"\bAUTOINCREMENT\b", re.IGNORECASE),  # SQLite 是连写，MySQL 是 AUTO_INCREMENT
+]
+
+
+def sniff_source_dialect(file_path: Path, limit_lines: int = 1000) -> str:
+    """流式读取 SQL 文件前 N 行，通过特征词正则匹配自动识别源 SQL 方言。
+    
+    默认返回值：'mysql'
+    """
+    mysql_score = 0
+    oracle_score = 0
+    kingbase_score = 0
+    pgsql_score = 0
+    sqlite_score = 0
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f):
+                if i >= limit_lines:
+                    break
+
+                # 累加各方言命中分数
+                for pat in _MYSQL_SNIFF_PATS:
+                    if pat.search(line):
+                        mysql_score += 1
+                for pat in _ORACLE_SNIFF_PATS:
+                    if pat.search(line):
+                        oracle_score += 1
+                for pat in _KINGBASE_SNIFF_PATS:
+                    if pat.search(line):
+                        kingbase_score += 1
+                for pat in _PGSQL_SNIFF_PATS:
+                    if pat.search(line):
+                        pgsql_score += 1
+                for pat in _SQLITE_SNIFF_PATS:
+                    if pat.search(line):
+                        sqlite_score += 1
+    except OSError:
+        pass
+
+    # 比较分数
+    scores = {"mysql": mysql_score, "oracle": oracle_score, "kingbase": kingbase_score, "pgsql": pgsql_score, "sqlite": sqlite_score}
+    max_dialect = max(scores, key=scores.get)
+
+    # 若无明显特征，默认降级为 mysql
+    if scores[max_dialect] == 0:
+        return "mysql"
+
+    return max_dialect
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="在不同数据库之间转换 SQL 文件"
     )
-    parser.add_argument("input", help="待转换的 .sql 文件路径")
+    parser.add_argument("input", help="待转换 Rar 的 .sql 文件路径")
     parser.add_argument(
         "-o", "--output",
         default=None,
@@ -41,13 +135,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--source-mode",
-        default="mysql",
-        help="源数据库类型，默认 mysql",
+        default=None,
+        help="源数据库类型，缺省为自动嗅探",
     )
     parser.add_argument(
         "--target-mode",
-        default="kingbase",
-        help="目标数据库类型，默认 kingbase",
+        default=None,
+        help="目标数据库类型（必填），如 kingbase、mysql 等",
     )
     parser.add_argument(
         "--encoding",
@@ -72,62 +166,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def is_insert_line(line: str) -> bool:
-    """判断一行是否为 INSERT 数据行（大小写不敏感）。"""
-    return line.lstrip()[:11].upper().startswith("INSERT INTO")
-
-
-def filter_rules(source_mode: str, target_mode: str) -> list[dict]:
-    """返回适用 source_mode → target_mode 的规则子集。
-
-    规则 source_mode=["*"] 或 target_mode=["*"] 表示通配。
-    """
-    filtered: list[dict] = []
-    for rule in RULES:
-        src_ok = rule["source_mode"] == ["*"] or source_mode in rule["source_mode"]
-        tgt_ok = rule["target_mode"] == ["*"] or target_mode in rule["target_mode"]
-        if src_ok and tgt_ok:
-            filtered.append(rule)
-    return filtered
-
-
 # ---------------------------------------------------------------------------
-# 规则应用
+# 规则应用（已迁移至 converter.pipeline.Pipeline）
 # ---------------------------------------------------------------------------
-
-
-def apply_global_rules(text: str, counters: dict[str, int], rules: list[dict]) -> str:
-    """对整段文本依次应用所有 scope=global 规则。"""
-    for rule in rules:
-        if rule["scope"] != "global":
-            continue
-        pattern: re.Pattern = rule["pattern"]
-        replacement = rule["replacement"]
-        new_text, n = pattern.subn(replacement, text)
-        counters[rule["name"]] = counters.get(rule["name"], 0) + n
-        text = new_text
-    return text
-
-
-def apply_line_rules(text: str, counters: dict[str, int], rules: list[dict]) -> str:
-    """按行应用所有 scope=line 规则；INSERT 行按 skip_insert 跳过。"""
-    line_rules = [r for r in rules if r["scope"] == "line"]
-    if not line_rules:
-        return text
-
-    out_lines: list[str] = []
-    # splitlines(keepends=True) 保留原有换行，避免结尾丢换行或多加
-    for line in text.splitlines(keepends=True):
-        skip_because_insert = is_insert_line(line)
-        for rule in line_rules:
-            if skip_because_insert and rule["skip_insert"]:
-                continue
-            pattern: re.Pattern = rule["pattern"]
-            new_line, n = pattern.subn(rule["replacement"], line)
-            counters[rule["name"]] = counters.get(rule["name"], 0) + n
-            line = new_line
-        out_lines.append(line)
-    return "".join(out_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -153,19 +194,12 @@ def _escape_comment(text: str) -> str:
     return text
 
 
-def _table_label(table) -> str:
-    """生成带数据库名的表标识符用于注释头。"""
-    if table.database:
-        return f"`{table.database}`.`{table.name}`"
-    return f"`{table.name}`"
-
-
-def format_structured_output(tables: list) -> str:
+def format_structured_output(tables: list, dialect: BaseDialect) -> str:
     """将解析后的表列表格式化为 5 步骤结构化 SQL 输出。"""
     parts: list[str] = []
 
     for table in tables:
-        label = _table_label(table)
+        label = dialect.format_table_label(table)
         parts.append("-- ============================================")
         parts.append(f"-- 表名: {label} 开始")
         parts.append("-- ============================================")
@@ -175,34 +209,45 @@ def format_structured_output(tables: list) -> str:
         parts.append("-- --------------------------------------------")
         parts.append("-- 步骤1: 删除旧表")
         parts.append("-- --------------------------------------------")
-        parts.append(f"DROP TABLE IF EXISTS `{table.name}` CASCADE;")
+        parts.append(dialect.format_drop_table(table))
         parts.append("")
 
         # 步骤2: 表结构
         parts.append("-- --------------------------------------------")
         parts.append("-- 步骤2: 表结构")
         parts.append("-- --------------------------------------------")
-        _format_create_table(table, parts)
+        parts.append(dialect.format_create_table(table))
+        parts.append("")
 
         # 步骤3: 索引
         parts.append("-- --------------------------------------------")
         parts.append("-- 步骤3: 索引")
         parts.append("-- --------------------------------------------")
-        _format_indexes(table, parts)
+        extra_indexes = dialect.format_indexes(table)
+        if extra_indexes:
+            parts.extend(extra_indexes)
+        else:
+            parts.append("-- 无额外索引")
+        parts.append("")
 
         # 步骤4: 外键
         parts.append("-- --------------------------------------------")
         parts.append("-- 步骤4: 外键")
         parts.append("-- --------------------------------------------")
-        _format_foreign_keys(table, parts)
+        fks = dialect.format_foreign_keys(table)
+        if fks:
+            parts.extend(fks)
+        else:
+            parts.append("-- 无外键")
+        parts.append("")
 
         # 步骤5: 数据导入
         parts.append("-- --------------------------------------------")
         parts.append("-- 步骤5: 数据导入")
         parts.append("-- --------------------------------------------")
-        _format_inserts(table, parts)
-
+        parts.extend(dialect.format_inserts(table))
         parts.append("")
+
         parts.append("-- ============================================")
         parts.append(f"-- 表名: {label} 结束")
         parts.append("-- ============================================")
@@ -211,120 +256,15 @@ def format_structured_output(tables: list) -> str:
     return "\n".join(parts)
 
 
-def _format_create_table(table, parts: list[str]) -> None:
-    """格式化 CREATE TABLE 语句。"""
-    lines: list[str] = []
-    lines.append(f"CREATE TABLE `{table.name}` (")
-
-    # 列定义
-    col_lines: list[str] = []
-    for col in table.columns:
-        col_str = f"  `{col.name}` {col.type_}"
-        if col.comment:
-            col_str += f" COMMENT '{_escape_comment(col.comment)}'"
-        col_lines.append(col_str)
-
-    # 主键
-    if table.primary_key:
-        pk_cols = ", ".join(f"`{c}`" for c in table.primary_key)
-        col_lines.append(f"  PRIMARY KEY ({pk_cols})")
-
-    lines.append(",\n".join(col_lines))
-    lines.append(")")
-    if table.comment:
-        lines[-1] += f" COMMENT='{_escape_comment(table.comment)}'"
-    lines[-1] += ";"
-
-    parts.extend(lines)
-    parts.append("")
-
-
-def _format_indexes(table, parts: list[str]) -> None:
-    """格式化索引为 ALTER TABLE 语句。主键已在 CREATE TABLE 中，此处只输出额外索引。"""
-    extra_indexes = table.indexes
-
-    if not extra_indexes:
-        parts.append("-- 无额外索引")
-        parts.append("")
-        return
-
-    for idx in extra_indexes:
-        key_type = "UNIQUE KEY" if idx.unique else "KEY"
-        cols = ", ".join(f"`{c}`" for c in idx.columns)
-        stmt = f"ALTER TABLE `{table.name}` ADD {key_type} `{idx.name}` ({cols})"
-        if idx.comment:
-            stmt += f" COMMENT '{_escape_comment(idx.comment)}'"
-        stmt += ";"
-        parts.append(stmt)
-    parts.append("")
-
-
-def _format_foreign_keys(table, parts: list[str]) -> None:
-    """格式化外键为 ALTER TABLE 语句。"""
-    if not table.foreign_keys:
-        parts.append("-- 无外键")
-        parts.append("")
-        return
-
-    for fk in table.foreign_keys:
-        cols = ", ".join(f"`{c}`" for c in fk.columns)
-        ref_cols = ", ".join(f"`{c}`" for c in fk.ref_columns)
-        stmt = (
-            f"ALTER TABLE `{table.name}` ADD CONSTRAINT `{fk.name or 'fk_' + table.name}` "
-            f"FOREIGN KEY ({cols}) REFERENCES `{fk.ref_table}` ({ref_cols})"
-        )
-        if fk.on_delete:
-            stmt += f" ON DELETE {fk.on_delete}"
-        if fk.on_update:
-            stmt += f" ON UPDATE {fk.on_update}"
-        stmt += ";"
-        parts.append(stmt)
-    parts.append("")
-
-
-def _format_inserts(table, parts: list[str]) -> None:
-    """格式化 INSERT 数据。每条原始 INSERT 独立输出，保持各自列顺序。"""
-    if not table.inserts:
-        parts.append("-- 无数据")
-        parts.append("")
-        return
-
-    for insert_block in table.inserts:
-        # 列名列表（本条 INSERT 独有）
-        if insert_block.columns:
-            cols_str = ", ".join(f"`{c}`" for c in insert_block.columns)
-        else:
-            cols_str = ""
-
-        # 值行
-        value_lines: list[str] = []
-        for row in insert_block.values:
-            formatted_values: list[str] = []
-            for val in row:
-                if val.upper() == "NULL":
-                    formatted_values.append("NULL")
-                else:
-                    formatted_values.append(val)
-            value_lines.append(f"({', '.join(formatted_values)})")
-
-        if cols_str:
-            parts.append(f"INSERT INTO `{table.name}` ({cols_str}) VALUES")
-        else:
-            parts.append(f"INSERT INTO `{table.name}` VALUES")
-
-        # 多行值用逗号分隔
-        parts.append(",\n".join(value_lines) + ";")
-
-
-def convert(text: str, source_mode: str, target_mode: str, database: str | None = None) -> tuple[str, dict[str, int]]:
-    """转换主入口：过滤规则 → global → line → 解析表结构 → FK排序 → 格式化输出。"""
-    rules = filter_rules(source_mode, target_mode)
-    counters: dict[str, int] = {r["name"]: 0 for r in rules}
-    text = apply_global_rules(text, counters, rules)
-    text = apply_line_rules(text, counters, rules)
+def convert(text: str, source_mode: str, target_mode: str,
+            database: str | None = None) -> tuple[str, dict[str, int]]:
+    """转换主入口：Pipeline → 解析表结构 → FK排序 → 格式化输出。"""
+    source_dialect = get_dialect(source_mode, database)
+    target_dialect = get_dialect(target_mode, database)
+    text, counters = _pipeline.run(text, source_dialect, target_dialect)
     tables = parse_tables(text, database)
     tables = sort_tables_by_fk(tables)
-    text = format_structured_output(tables)
+    text = format_structured_output(tables, target_dialect)
     return text, counters
 
 
@@ -336,13 +276,23 @@ def die(msg: str, code: int) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
+    # 校验 target-mode 不能为空
+    if not args.target_mode or not args.target_mode.strip():
+        die("Error: --target-mode is required. Please specify the target database type, e.g. --target-mode kingbase", EXIT_USAGE)
+
     input_path = Path(args.input)
     if not input_path.exists():
         die(f"Error: input file not found: {input_path}", EXIT_USAGE)
     if input_path.is_dir():
         die(f"Error: input path is a directory: {input_path}", EXIT_USAGE)
 
-    output_path = Path(args.output) if args.output else default_output_path(input_path)
+    # 嗅探 source_mode
+    source_mode = args.source_mode
+    if source_mode is None:
+        source_mode = sniff_source_dialect(input_path)
+        print(f"Auto-detected source mode: {source_mode}")
+
+    output_path = Path(args.output) if args.output else default_output_path(input_path, args.target_mode)
     if output_path.exists() and not args.overwrite:
         die(
             f"Error: output exists, use --overwrite to replace: {output_path}",
@@ -365,33 +315,27 @@ def main(argv: list[str] | None = None) -> int:
 
     # 转换
     try:
-        converted, counters = convert(text, args.source_mode, args.target_mode, args.database)
+        converted, counters = convert(text, source_mode, args.target_mode, args.database)
     except Exception as e:
         die(f"Error: rule application failed: {e}", EXIT_RUNTIME)
 
-    # 原子写入：先写 tmp，成功后 os.replace
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    # 使用方言策略写入输出
     try:
-        tmp_path.write_text(converted, encoding=args.encoding)
-        os.replace(tmp_path, output_path)
-    except OSError as e:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-        die(f"Error: cannot write {output_path}: {e}", EXIT_RUNTIME)
+        dialect = get_dialect(args.target_mode, args.database)
+        written_path = dialect.write_output(converted, output_path)
+    except Exception as e:
+        die(f"Error: cannot write output: {e}", EXIT_RUNTIME)
 
     applied_rules = sum(1 for n in counters.values() if n > 0)
     print(
         f"Converted {line_count} lines, applied {applied_rules} rules, "
-        f"wrote to {output_path}"
+        f"wrote to {written_path}"
     )
     if args.verbose:
         print("Rule hit counts:")
-        for rule in RULES:
-            n = counters.get(rule["name"], 0)
-            print(f"  {rule['name']:<32} {n:>6}   {rule['desc']}")
+        for name, n in sorted(counters.items()):
+            if n > 0:
+                print(f"  {name:<32} {n:>6}")
 
     return EXIT_OK
 
