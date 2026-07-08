@@ -13,17 +13,17 @@ class TestSniffSourceDialect(unittest.TestCase):
 
     def test_mysql_features(self):
         """MySQL 特征文件应被识别为 mysql。"""
-        result = sniff_source_dialect(Path("tests/sample_input.sql"))
+        result, _ = sniff_source_dialect(Path("tests/sample_input.sql"))
         self.assertEqual(result, "mysql")
 
     def test_oracle_features(self):
         """Oracle 特征文件应被识别为 oracle。"""
-        result = sniff_source_dialect(Path("tests/sniff_oracle_input.sql"))
+        result, _ = sniff_source_dialect(Path("tests/sniff_oracle_input.sql"))
         self.assertEqual(result, "oracle")
 
     def test_mysql_edge_cases(self):
         """MySQL 边界场景文件应被识别为 mysql。"""
-        result = sniff_source_dialect(Path("tests/edge_cases_input.sql"))
+        result, _ = sniff_source_dialect(Path("tests/edge_cases_input.sql"))
         self.assertEqual(result, "mysql")
 
     def test_empty_file_defaults_to_mysql(self):
@@ -32,7 +32,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "mysql")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -44,7 +44,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE TABLE orders (id INTEGER);\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "mysql")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -56,7 +56,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE TABLE t2 (id INT) WITHOUT SYSTEM OIDS;\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "kingbase")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -71,7 +71,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "pgsql")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -83,7 +83,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("SELECT id::text FROM t;\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "pgsql")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -98,7 +98,7 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE TABLE t2 (x NUMBER);\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "mysql")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -113,14 +113,14 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE TABLE t_extra (`col` INT);\n")
             tmp_path = Path(f.name)
         try:
-            result = sniff_source_dialect(tmp_path)
+            result, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result, "oracle")
         finally:
             tmp_path.unlink(missing_ok=True)
 
     def test_nonexistent_file_returns_default(self):
         """不存在的文件应降级为 mysql（不抛异常）。"""
-        result = sniff_source_dialect(Path("tests/does_not_exist.sql"))
+        result, _ = sniff_source_dialect(Path("tests/does_not_exist.sql"))
         self.assertEqual(result, "mysql")
 
     def test_limit_lines_respected(self):
@@ -131,9 +131,9 @@ class TestSniffSourceDialect(unittest.TestCase):
             f.write("CREATE TABLE t (x VARCHAR2(100));\n")
             tmp_path = Path(f.name)
         try:
-            result_limited = sniff_source_dialect(tmp_path, limit_lines=5)
+            result_limited, _ = sniff_source_dialect(tmp_path, limit_lines=5)
             self.assertEqual(result_limited, "mysql")
-            result_default = sniff_source_dialect(tmp_path)
+            result_default, _ = sniff_source_dialect(tmp_path)
             self.assertEqual(result_default, "oracle")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -182,6 +182,11 @@ class TestSniffIntegration(unittest.TestCase):
         """明确指定 --source-mode 时，args.source_mode 为指定值。"""
         args = parse_args(["input.sql", "--source-mode", "oracle"])
         self.assertEqual(args.source_mode, "oracle")
+
+    def test_source_mode_default(self):
+        """默认 source-mode 为 None（必填，无默认值）。"""
+        args = parse_args(["input.sql"])
+        self.assertIsNone(args.source_mode)
 
     def test_target_mode_default(self):
         """默认 target-mode 为 None（必填，无默认值）。"""

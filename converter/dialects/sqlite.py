@@ -48,6 +48,23 @@ class SqliteDialect(BaseDialect):
         "GroupConcat": "GROUP_CONCAT",
     }
 
+    type_to_canonical: dict[str, str] = {
+        "integer": "Integer32", "int": "Integer32",
+        "real": "Real32",
+        "text": "Text", "varchar": "Text", "char": "Text",
+        "blob": "Blob",
+    }
+
+    function_to_canonical: dict[str, str] = {
+        "CURRENT_TIMESTAMP": "CurrentTimestamp",
+        "DATE('now')": "CurrentDate",
+        "TIME('now')": "CurrentTime",
+        "IFNULL": "Coalesce",
+        "LENGTH": "Length",
+        "GROUP_CONCAT": "GroupConcat",
+        "lower(hex(randomblob(16)))": "Uuid",
+    }
+
     def quote_identifier(self, name: str) -> str:
         return f'"{name}"'
 

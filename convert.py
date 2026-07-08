@@ -51,18 +51,27 @@ _ORACLE_SNIFF_PATS = [
     re.compile(r"\bSYSDATE\b", re.IGNORECASE),
 ]
 
+# Kingbase / PostgreSQL 共用特征（Kingbase 基于 PG）
+_PG_SNIFF_PATS = [
+    re.compile(r"\bCOMMENT\s+ON\b", re.IGNORECASE),    # COMMENT ON TABLE/COLUMN（PG 家族特有）
+    re.compile(r"\bCASCADE\b", re.IGNORECASE),          # DROP TABLE ... CASCADE
+    re.compile(r"\bSERIAL\b", re.IGNORECASE),           # SERIAL / BIGSERIAL
+    re.compile(r"\bBYTEA\b", re.IGNORECASE),            # PG 二进制类型
+    re.compile(r"\bBOOLEAN\b", re.IGNORECASE),          # PG 布尔类型
+    re.compile(r"::\w+"),                                # ::type 类型转换
+    re.compile(r"\bRETURNING\b", re.IGNORECASE),
+]
+
 # Kingbase 专属特征
 _KINGBASE_SNIFF_PATS = [
     re.compile(r"\bWITHOUT\s+SYSTEM\s+OIDS\b", re.IGNORECASE),
     re.compile(r"\bWITHOUT\s+OIDS\b", re.IGNORECASE),
+    re.compile(r"\bSYS_REFCURSOR\b", re.IGNORECASE),
 ]
 
 # PostgreSQL 专属特征
 _PGSQL_SNIFF_PATS = [
-    re.compile(r"::\w+"),  # ::type 类型转换
-    re.compile(r"\bSERIAL\b", re.IGNORECASE),  # SERIAL / BIGSERIAL
     re.compile(r"\bILIKE\b", re.IGNORECASE),
-    re.compile(r"\bRETURNING\b", re.IGNORECASE),
     re.compile(r"\bpg_catalog\b", re.IGNORECASE),
     re.compile(r"\bCREATE\s+EXTENSION\b", re.IGNORECASE),
 ]
@@ -76,10 +85,10 @@ _SQLITE_SNIFF_PATS = [
 ]
 
 
-def sniff_source_dialect(file_path: Path, limit_lines: int = 1000) -> str:
+def sniff_source_dialect(file_path: Path, limit_lines: int = 1000) -> tuple[str, float]:
     """流式读取 SQL 文件前 N 行，通过特征词正则匹配自动识别源 SQL 方言。
-    
-    默认返回值：'mysql'
+
+    返回 (方言名, 置信度百分比)。默认降级为 'mysql'。
     """
     mysql_score = 0
     oracle_score = 0
@@ -100,6 +109,10 @@ def sniff_source_dialect(file_path: Path, limit_lines: int = 1000) -> str:
                 for pat in _ORACLE_SNIFF_PATS:
                     if pat.search(line):
                         oracle_score += 1
+                for pat in _PG_SNIFF_PATS:
+                    if pat.search(line):
+                        kingbase_score += 1
+                        pgsql_score += 1
                 for pat in _KINGBASE_SNIFF_PATS:
                     if pat.search(line):
                         kingbase_score += 1
@@ -115,12 +128,19 @@ def sniff_source_dialect(file_path: Path, limit_lines: int = 1000) -> str:
     # 比较分数
     scores = {"mysql": mysql_score, "oracle": oracle_score, "kingbase": kingbase_score, "pgsql": pgsql_score, "sqlite": sqlite_score}
     max_dialect = max(scores, key=scores.get)
+    total = sum(scores.values())
 
     # 若无明显特征，默认降级为 mysql
     if scores[max_dialect] == 0:
-        return "mysql"
+        return "mysql", 0.0
 
-    return max_dialect
+    # PG 家族平票时优先 pgsql（kingbase 基于 PG，pgsql 特征更明确）
+    if scores["kingbase"] == scores["pgsql"] and max_dialect == "kingbase":
+        max_dialect = "pgsql"
+
+    # 置信度 = 最高分 / 总分（若有多个方言命中，置信度降低）
+    confidence = (scores[max_dialect] / total * 100) if total > 0 else 0.0
+    return max_dialect, confidence
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -136,7 +156,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--source-mode",
         default=None,
-        help="源数据库类型，缺省为自动嗅探",
+        help="源数据库类型（必填），如 mysql、oracle、pgsql 等",
     )
     parser.add_argument(
         "--target-mode",
@@ -276,6 +296,10 @@ def die(msg: str, code: int) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
+    # 校验 source-mode 不能为空
+    if not args.source_mode or not args.source_mode.strip():
+        die("Error: --source-mode is required. Please specify the source database type, e.g. --source-mode mysql", EXIT_USAGE)
+
     # 校验 target-mode 不能为空
     if not args.target_mode or not args.target_mode.strip():
         die("Error: --target-mode is required. Please specify the target database type, e.g. --target-mode kingbase", EXIT_USAGE)
@@ -286,11 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     if input_path.is_dir():
         die(f"Error: input path is a directory: {input_path}", EXIT_USAGE)
 
-    # 嗅探 source_mode
-    source_mode = args.source_mode
-    if source_mode is None:
-        source_mode = sniff_source_dialect(input_path)
-        print(f"Auto-detected source mode: {source_mode}")
+    source_mode = args.source_mode.strip()
 
     output_path = Path(args.output) if args.output else default_output_path(input_path, args.target_mode)
     if output_path.exists() and not args.overwrite:

@@ -63,11 +63,37 @@ class MysqlDialect(BaseDialect):
         "UUID()": "Uuid", "LENGTH": "Length", "CHAR_LENGTH": "CharLength",
     }
 
+    canonical_to_type: dict[str, str] = {
+        "Integer8": "TINYINT", "Integer16": "SMALLINT",
+        "Integer32": "INT", "Integer64": "BIGINT",
+        "Real32": "FLOAT", "Real64": "DOUBLE",
+        "Decimal": "DECIMAL", "Text": "VARCHAR(255)",
+        "DateTime": "datetime", "Date": "date", "Time": "time",
+        "Blob": "LONGBLOB", "Enum": "VARCHAR(255)", "Set": "VARCHAR(255)",
+        "Bit": "TINYINT(1)", "Boolean": "TINYINT(1)",
+    }
+
+    canonical_to_function: dict[str, str] = {
+        "CurrentTimestamp": "NOW()",
+        "CurrentDate": "CURDATE()",
+        "CurrentTime": "CURTIME()",
+        "Coalesce": "IFNULL",
+        "GroupConcat": "GROUP_CONCAT",
+        "ConcatWs": "CONCAT_WS",
+        "DateFormat": "DATE_FORMAT",
+        "StrToDate": "STR_TO_DATE",
+        "UnixTimestamp": "UNIX_TIMESTAMP",
+        "FromUnixtime": "FROM_UNIXTIME",
+        "Uuid": "UUID()",
+        "Length": "LENGTH",
+        "CharLength": "CHAR_LENGTH",
+    }
+
     def quote_identifier(self, name: str) -> str:
         return f"`{name}`"
 
     def format_drop_table(self, table: TableBlock) -> str:
-        return f"DROP TABLE IF EXISTS {self.quote_identifier(table.name)} CASCADE;"
+        return f"DROP TABLE IF EXISTS {self.quote_identifier(table.name)};"
 
     def format_create_table(self, table: TableBlock) -> str:
         lines: list[str] = []

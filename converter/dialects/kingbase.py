@@ -51,6 +51,33 @@ class KingbaseDialect(BaseDialect):
         "CharLength": "CHAR_LENGTH",
     }
 
+    type_to_canonical: dict[str, str] = {
+        "smallint": "Integer16", "integer": "Integer32", "int": "Integer32",
+        "bigint": "Integer64", "int2": "Integer16", "int4": "Integer32", "int8": "Integer64",
+        "real": "Real32", "float": "Real64", "double precision": "Real64",
+        "decimal": "Decimal", "numeric": "Decimal",
+        "varchar": "Text", "char": "Text", "text": "Text",
+        "timestamp": "DateTime", "date": "Date", "time": "Time",
+        "bytea": "Blob", "boolean": "Boolean", "bool": "Boolean",
+        "serial": "Integer32", "bigserial": "Integer64",
+    }
+
+    function_to_canonical: dict[str, str] = {
+        "CURRENT_TIMESTAMP": "CurrentTimestamp",
+        "CURRENT_DATE": "CurrentDate",
+        "CURRENT_TIME": "CurrentTime",
+        "COALESCE": "Coalesce",
+        "CONCAT_WS": "ConcatWs",
+        "STRING_AGG": "GroupConcat",
+        "TO_CHAR": "DateFormat",
+        "TO_DATE": "StrToDate",
+        "EXTRACT(EPOCH FROM NOW())": "UnixTimestamp",
+        "TO_TIMESTAMP": "FromUnixtime",
+        "GEN_RANDOM_UUID()": "Uuid",
+        "LENGTH": "Length",
+        "CHAR_LENGTH": "CharLength",
+    }
+
     def quote_identifier(self, name: str) -> str:
         # 使用符合 SQL 标准的双引号
         return f'"{name}"'
