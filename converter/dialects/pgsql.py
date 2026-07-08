@@ -29,7 +29,7 @@ class PgsqlDialect(BaseDialect):
         "Integer8": "SMALLINT", "Integer16": "SMALLINT",
         "Integer32": "INTEGER", "Integer64": "BIGINT",
         "Real32": "REAL", "Real64": "DOUBLE PRECISION",
-        "Decimal": "NUMERIC", "Text": "TEXT",
+        "Decimal": "NUMERIC", "Text": "VARCHAR",
         "DateTime": "TIMESTAMP", "Date": "DATE", "Time": "TIME",
         "Blob": "BYTEA", "Enum": "VARCHAR(255)", "Set": "VARCHAR(255)",
         "Bit": "SMALLINT", "Boolean": "BOOLEAN",

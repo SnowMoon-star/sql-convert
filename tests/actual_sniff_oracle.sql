@@ -12,7 +12,7 @@ DROP TABLE IF EXISTS "test_oracle" CASCADE;
 -- --------------------------------------------
 CREATE TABLE "test_oracle" (
   "id" NUMERIC NOT NULL,
-  "desc" TEXT
+  "desc" VARCHAR(255)
 );
 
 -- --------------------------------------------

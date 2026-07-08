@@ -34,8 +34,12 @@ def build_type_pattern(dialect) -> re.Pattern:
     )
 
 
+# 需要保留尺寸参数的规范类型（VARCHAR(64)、DECIMAL(10,2) 等）
+_SIZE_PRESERVING = {"Text", "Decimal"}
+
+
 def map_types(text: str, source_dialect, target_dialect) -> tuple[str, int]:
-    """将文本中所有源类型替换为目标类型（自动去除显示宽度）。"""
+    """将文本中所有源类型替换为目标类型。整数显示宽度丢弃，VARCHAR/DECIMAL 尺寸保留。"""
     if not source_dialect.type_to_canonical or not target_dialect.canonical_to_type:
         return text, 0
 
@@ -43,10 +47,16 @@ def map_types(text: str, source_dialect, target_dialect) -> tuple[str, int]:
 
     def repl(m):
         src_type = m.group(1).lower()
+        size_param = m.group(2) or ""  # 如 "(64)" 或 "(10,2)" 或空
         canonical = source_dialect.type_to_canonical.get(src_type)
         if canonical:
             target_type = target_dialect.canonical_to_type.get(canonical)
             if target_type:
+                # 保留尺寸参数（Text/Decimal 类型）
+                if canonical in _SIZE_PRESERVING and size_param.strip():
+                    # 处理目标类型可能已有尺寸的情况（如 VARCHAR(255)）
+                    base = target_type.split("(")[0]
+                    return base + size_param
                 return target_type
         return m.group(0)
 
