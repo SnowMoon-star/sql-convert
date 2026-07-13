@@ -60,18 +60,39 @@ class TokenStream:
 
 
 def _collect_identifiers_in_parens(stream: TokenStream) -> list[str]:
-    """收集括号内的标识符列表，如 `(col1, col2)`。"""
+    """收集括号内的标识符列表，并能正确处理和剥离嵌套小括号（如列前缀长度(10)）与 ASC/DESC 关键字。"""
     ids = []
     if not stream.match(T_PUNCTUATION, "("):
         return ids
+
+    seg_tokens: list[list[Token]] = []
+    current_seg: list[Token] = []
+    paren_depth = 1
+
     while not stream.is_eof():
-        if stream.match(T_PUNCTUATION, ")"):
-            break
-        t = stream.consume()
-        if t.type in (T_IDENTIFIER, T_QUOTED_IDENTIFIER):
-            ids.append(clean_id(t.value))
-        elif t.type == T_PUNCTUATION and t.value == ",":
-            continue
+        tok = stream.consume()
+        if tok.type == T_PUNCTUATION and tok.value == "(":
+            paren_depth += 1
+            current_seg.append(tok)
+        elif tok.type == T_PUNCTUATION and tok.value == ")":
+            paren_depth -= 1
+            if paren_depth == 0:
+                if current_seg:
+                    seg_tokens.append(current_seg)
+                break
+            current_seg.append(tok)
+        elif tok.type == T_PUNCTUATION and tok.value == "," and paren_depth == 1:
+            if current_seg:
+                seg_tokens.append(current_seg)
+                current_seg = []
+        else:
+            current_seg.append(tok)
+
+    for seg in seg_tokens:
+        for t in seg:
+            if t.type in (T_IDENTIFIER, T_QUOTED_IDENTIFIER):
+                ids.append(clean_id(t.value))
+                break
     return ids
 
 
