@@ -702,24 +702,16 @@ class ConversionReport:
         return "\n".join(lines)
 
     def write_report(self, output_path: str | Path, source_mode: str, target_mode: str) -> Path:
-        """根据输出路径生成带精确时间戳的多维度报告文件（HTML、JSON、Markdown）。"""
+        """根据输出路径生成带精确时间戳的 HTML 报告文件：<输出主名>_yyyyMMddHHmmss_report.html。"""
         out_p = Path(output_path)
         timestamp = time.strftime('%Y%m%d%H%M%S')
         
         # 确保目录存在
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
-        # 1. 写出 HTML
+        # 写出 HTML
         report_name = f"{out_p.stem}_{timestamp}_report.html"
         report_path = out_p.with_name(report_name)
         report_path.write_text(self.generate_html(source_mode, target_mode), encoding="utf-8")
-
-        # 2. 写出 JSON
-        json_path = out_p.with_name(f"{out_p.stem}_{timestamp}_report.json")
-        json_path.write_text(self.generate_json(), encoding="utf-8")
-
-        # 3. 写出 Markdown
-        md_path = out_p.with_name(f"{out_p.stem}_{timestamp}_report.md")
-        md_path.write_text(self.generate_markdown(source_mode, target_mode), encoding="utf-8")
 
         return report_path

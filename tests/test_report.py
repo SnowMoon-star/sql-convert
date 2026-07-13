@@ -32,8 +32,8 @@ class TestConversionReport(unittest.TestCase):
         self.assertEqual(len(report.failed_statements), 1)
         self.assertGreater(report.duration, 0)
 
-    def test_report_generation_all_formats(self):
-        """测试 HTML, JSON 和 Markdown 格式报告生成与写入。"""
+    def test_html_report_generation(self):
+        """测试 HTML 格式报告生成与写入。"""
         report = ConversionReport()
         report.increment_table()
         report.update_rule_hits({"convert_type": 1})
@@ -43,38 +43,22 @@ class TestConversionReport(unittest.TestCase):
             tmp_output_path = Path(f.name)
         
         report_path = None
-        json_path = None
-        md_path = None
         try:
             report_path = report.write_report(tmp_output_path, "mysql", "pgsql")
-            json_path = tmp_output_path.with_name(f"{tmp_output_path.stem}_{report_path.name.split('_')[-2]}_report.json")
-            md_path = tmp_output_path.with_name(f"{tmp_output_path.stem}_{report_path.name.split('_')[-2]}_report.md")
-
             self.assertTrue(report_path.exists())
-            self.assertTrue(json_path.exists())
-            self.assertTrue(md_path.exists())
+            self.assertTrue(report_path.name.endswith("_report.html"))
             
             # HTML 验证
             html_content = report_path.read_text(encoding="utf-8")
             self.assertIn("SQL 转换评估报告", html_content)
-            
-            # JSON 验证
-            json_content = json_path.read_text(encoding="utf-8")
-            self.assertIn('"table_count": 1', json_content)
-            
-            # MD 验证
-            md_content = md_path.read_text(encoding="utf-8")
-            self.assertIn("# SQL 转换评估报告", md_content)
-            self.assertIn("Test warning message", md_content)
+            self.assertIn("MYSQL", html_content)
+            self.assertIn("PGSQL", html_content)
+            self.assertIn("Test warning message", html_content)
 
         finally:
             tmp_output_path.unlink(missing_ok=True)
             if report_path and report_path.exists():
                 report_path.unlink(missing_ok=True)
-            if json_path and json_path.exists():
-                json_path.unlink(missing_ok=True)
-            if md_path and md_path.exists():
-                md_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
