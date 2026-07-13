@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from converter.dialects.base import BaseDialect
-
+from converter.pipeline.rule_context import RuleContext
 
 @dataclass
 class Rule:
@@ -62,8 +62,7 @@ class Pipeline:
     def __init__(self, stages: list[list[Rule]]):
         self.stages = stages
 
-    def run(self, text: str, source: BaseDialect, target: BaseDialect
-            ) -> tuple[str, dict[str, int]]:
+    def run(self, text: str, source: BaseDialect, target: BaseDialect) -> tuple[str, dict[str, int]]:
         counters: dict[str, int] = {}
 
         # 阶段1-6: Rule-based 规则阶段
@@ -76,7 +75,8 @@ class Pipeline:
                 if rule.name == "normalize_delimiter":
                     text, n = rule.pattern.subn(
                         lambda m: m.group(2).replace(m.group(1), ";").strip() + ";\n",
-                        text)
+                        text
+                    )
                     counters[rule.name] = counters.get(rule.name, 0) + n
                     continue
 

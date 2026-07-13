@@ -15,52 +15,7 @@ from dataclasses import dataclass, field
 # 数据结构
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ColumnDef:
-    """列定义。"""
-    name: str              # 字段名（不含引号）
-    type_: str             # 完整类型+约束声明，如 "INT NOT NULL AUTO_INCREMENT"
-    comment: str | None    # COMMENT 'xxx' 注释文本（不含引号）
-
-
-@dataclass
-class IndexDef:
-    """索引定义。"""
-    name: str              # 索引名
-    columns: list[str]     # 字段列表（不含引号）
-    unique: bool           # True = UNIQUE KEY, False = KEY/INDEX
-    comment: str | None    # 索引注释
-
-
-@dataclass
-class ForeignKeyDef:
-    """外键定义。"""
-    name: str | None       # 外键约束名（可为空）
-    columns: list[str]     # 本表字段
-    ref_table: str         # 关联表名
-    ref_columns: list[str] # 关联字段
-    on_delete: str | None  # CASCADE / SET NULL / NO ACTION / ...
-    on_update: str | None
-
-
-@dataclass
-class InsertBlock:
-    """单条 INSERT 语句的数据。"""
-    columns: list[str] = field(default_factory=list)   # 列名列表（可为空）
-    values: list[list[str]] = field(default_factory=list)  # 值行
-
-
-@dataclass
-class TableBlock:
-    """一个表的完整信息。"""
-    database: str | None   # 数据库名（来自 CLI 参数或 SQL 中的 db.table）
-    name: str              # 表名
-    comment: str | None    # 表 COMMENT
-    columns: list[ColumnDef] = field(default_factory=list)
-    primary_key: list[str] = field(default_factory=list)
-    indexes: list[IndexDef] = field(default_factory=list)
-    foreign_keys: list[ForeignKeyDef] = field(default_factory=list)
-    inserts: list[InsertBlock] = field(default_factory=list)
+from model import ColumnDef, IndexDef, ForeignKeyDef, InsertBlock, TableBlock
 
 
 # ---------------------------------------------------------------------------
@@ -799,6 +754,47 @@ def parse_tables(sql: str, database: str | None = None) -> list[TableBlock]:
     _parse_comment_on(sql, table_map)
 
     return tables
+
+
+def parse_statement_to_schema(
+    sql: str,
+    table_map: dict[str, TableBlock],
+    tables: list[TableBlock],
+    database: str | None = None,
+) -> None:
+    """流式解析单条 DDL/DML/COMMENT 语句并更新到 table_map/tables 中。"""
+    # 1. 查找 CREATE TABLE
+    ct_m = _CREATE_TABLE_PAT.search(sql)
+    if ct_m:
+        table_name = ct_m.group(1) or ct_m.group(2) or ct_m.group(3)
+        paren_start = sql.find('(', ct_m.end() - 1)
+        if paren_start == -1:
+            paren_start = sql.find('(')
+        if paren_start != -1:
+            paren_end = _find_matching_paren(sql, paren_start)
+            if paren_end != -1:
+                table_body = sql[paren_start + 1:paren_end]
+                block = TableBlock(database=database, name=table_name, comment=None)
+
+                # 表 COMMENT
+                semi_pos = sql.find(';', paren_end + 1)
+                after_paren = sql[paren_end + 1:semi_pos] if semi_pos != -1 else sql[paren_end + 1:]
+                tc_m = _TABLE_COMMENT_PAT.search(after_paren)
+                if tc_m:
+                    block.comment = tc_m.group(2)
+
+                _parse_columns_and_constraints(table_body, block)
+
+                if table_name not in table_map:
+                    tables.append(block)
+                    table_map[table_name] = block
+        return
+
+    # 2. 其他独立约束/索引/注释语句（会对已解析的表结构做追加或修改）
+    _parse_standalone_fks(sql, table_map)
+    _parse_standalone_indexes(sql, table_map)
+    _parse_comment_on(sql, table_map)
+
 
 
 # ---------------------------------------------------------------------------

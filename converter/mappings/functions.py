@@ -21,13 +21,20 @@ LENGTH = "Length"
 CHAR_LENGTH = "CharLength"
 
 
-def build_function_pattern(dialect) -> re.Pattern:
-    """从方言的 function_to_canonical 键构建匹配正则。"""
-    keys = sorted(dialect.function_to_canonical.keys(), key=len, reverse=True)
+from functools import lru_cache
+
+@lru_cache(maxsize=16)
+def _get_cached_function_pattern(dialect_class) -> re.Pattern:
+    keys = sorted(dialect_class.function_to_canonical.keys(), key=len, reverse=True)
     return re.compile(
         "|".join(re.escape(k) for k in keys),
         re.IGNORECASE,
     )
+
+
+def build_function_pattern(dialect) -> re.Pattern:
+    """从方言的 function_to_canonical 键构建匹配正则。"""
+    return _get_cached_function_pattern(dialect.__class__)
 
 
 def map_functions(text: str, source_dialect, target_dialect) -> tuple[str, int]:

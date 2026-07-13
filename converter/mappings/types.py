@@ -23,15 +23,22 @@ BIT = "Bit"
 BOOLEAN = "Boolean"
 
 
-def build_type_pattern(dialect) -> re.Pattern:
-    """从方言的 type_to_canonical 键构建匹配正则。
-    按长度降序排列，确保 mediumint 在 int 之前匹配。
-    自动匹配并丢弃显示宽度如 int(11)、decimal(10,2)。"""
-    keys = sorted(dialect.type_to_canonical.keys(), key=len, reverse=True)
+from functools import lru_cache
+
+@lru_cache(maxsize=16)
+def _get_cached_type_pattern(dialect_class) -> re.Pattern:
+    keys = sorted(dialect_class.type_to_canonical.keys(), key=len, reverse=True)
     return re.compile(
         r"\b(" + "|".join(re.escape(k) for k in keys) + r")\b(\s*\(\d+(,\d+)?\))?",
         re.IGNORECASE,
     )
+
+
+def build_type_pattern(dialect) -> re.Pattern:
+    """从方言的 type_to_canonical 键构建匹配正则。
+    按长度降序排列，确保 mediumint 在 int 之前匹配。
+    自动匹配并丢弃显示宽度如 int(11)、decimal(10,2)。"""
+    return _get_cached_type_pattern(dialect.__class__)
 
 
 # 需要保留尺寸参数的规范类型（VARCHAR(64)、DECIMAL(10,2) 等）
