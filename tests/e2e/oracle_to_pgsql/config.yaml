@@ -1,0 +1,3 @@
+source_mode: "oracle"
+target_mode: "pgsql"
+ignore_comments: true

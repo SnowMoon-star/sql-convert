@@ -14,11 +14,8 @@ tests/actual.sql
 .claude/
 .codegraph/
 .vscode/
-
+.agents/
 
 # SDD 进度账本（脚手架产物，不入库）
 .superpowers/
-
-# AI Memory
-.ai_memory/
 

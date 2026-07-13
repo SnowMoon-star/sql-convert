@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from convert import sniff_source_dialect, parse_args
+from main import sniff_source_dialect, parse_args
 from converter.registry import get_dialect
 from converter.dialects.pgsql import PgsqlDialect
 
@@ -164,7 +164,7 @@ class TestPgsqlDialect(unittest.TestCase):
 
     def test_drop_table(self):
         """PostgreSQL DROP TABLE 使用 CASCADE。"""
-        from sql_parser import TableBlock
+        from model import TableBlock
         tb = TableBlock(database=None, name="users", comment=None)
         d = PgsqlDialect()
         self.assertEqual(d.format_drop_table(tb), 'DROP TABLE IF EXISTS "users" CASCADE;')

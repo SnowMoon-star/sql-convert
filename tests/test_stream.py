@@ -6,7 +6,7 @@ from pathlib import Path
 from reader.sql_reader import SQLReader
 from reader.classifier import classify_statement, StatementType
 from parser.insert_stream import iter_insert_rows, InsertRow
-from convert import convert
+from main import convert
 
 
 class TestSQLReader(unittest.TestCase):
@@ -75,7 +75,7 @@ class TestSQLReader(unittest.TestCase):
             reader = SQLReader(tmp_path)
             stmts = list(reader.iter_statements())
             self.assertEqual(len(stmts), 2)
-            self.assertTrue(stmts[0].startswith("CREATE FUNCTION"))
+            self.assertTrue(stmts[0].text.startswith("CREATE FUNCTION"))
             self.assertEqual(stmts[1], "SELECT 2;")
         finally:
             tmp_path.unlink(missing_ok=True)

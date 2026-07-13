@@ -4,6 +4,10 @@ import re
 from pathlib import Path
 from typing import Iterator
 
+from core.diagnostics import Statement
+from reader.classifier import classify_statement
+
+
 class SQLReader:
     """SQL 文件流式读取与语句切分器。"""
 
@@ -11,8 +15,8 @@ class SQLReader:
         self.file_path = Path(file_path)
         self.encoding = encoding
 
-    def iter_statements(self) -> Iterator[str]:
-        """流式遍历文件，生成单条完整的 SQL 语句。
+    def iter_statements(self) -> Iterator[Statement]:
+        """流式遍历文件，生成单条完整的 SQL Statement 实体（包装了物理行列和偏移）。
 
         能够处理并剔除：
         - 注释（行注释 --、# 和块注释 /* */）
@@ -24,13 +28,20 @@ class SQLReader:
         if not self.file_path.exists():
             return
 
-        state = "DEFAULT"  # DEFAULT, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, BLOCK_COMMENT, DOLLAR_QUOTE
+        state = "DEFAULT"  # DEFAULT, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, BLOCK_COMMENT, DOLLAR_QUOTE, MYSQL_VERSION_COMMENT
         dollar_tag = ""
         delimiter = ";"
         current_parts: list[str] = []
 
+        stmt_start_line = -1
+        stmt_start_offset = -1
+        current_line = 0
+        current_offset = 0
+
         with open(self.file_path, "r", encoding=self.encoding, errors="ignore") as f:
             for line in f:
+                current_line += 1
+
                 # 在默认状态下，检查是否是 MySQL DELIMITER 声明
                 if state == "DEFAULT":
                     stripped = line.strip()
@@ -38,26 +49,48 @@ class SQLReader:
                         parts = stripped.split(None, 1)
                         if len(parts) > 1:
                             delimiter = parts[1].strip()
-                        continue  # 略过 DELIMITER 自身声明行的输出
+                        current_offset += len(line)
+                        continue
 
                 i = 0
                 n = len(line)
                 while i < n:
                     ch = line[i]
+                    char_offset = current_offset + i
 
                     if state == "DEFAULT":
+                        # 跳过前导空白以确定语句的真正起止点
+                        if not current_parts and ch.isspace():
+                            i += 1
+                            continue
+
                         # 行注释：直接忽略本行剩余部分
                         if ch == "-" and i + 1 < n and line[i + 1] == "-":
                             break
                         elif ch == "#":
                             break
-                        # 块注释开始
+                        # 块注释或条件注释开始
                         elif ch == "/" and i + 1 < n and line[i + 1] == "*":
-                            state = "BLOCK_COMMENT"
-                            i += 2
-                            continue
+                            if i + 2 < n and line[i + 2] == "!":
+                                state = "MYSQL_VERSION_COMMENT"
+                                if not current_parts:
+                                    stmt_start_line = current_line
+                                    stmt_start_offset = char_offset
+                                current_parts.append("/*!")
+                                i += 3
+                                continue
+                            else:
+                                state = "BLOCK_COMMENT"
+                                i += 2
+                                continue
+
+                        # 如果当前语句的记录未开始，在此处记录起始元数据
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
+
                         # 引号开始
-                        elif ch == "'":
+                        if ch == "'":
                             state = "SINGLE_QUOTE"
                             current_parts.append(ch)
                         elif ch == '"':
@@ -83,16 +116,28 @@ class SQLReader:
                             delim_len = len(delimiter)
                             if line[i : i + delim_len] == delimiter:
                                 current_parts.append(line[i : i + delim_len])
-                                stmt = "".join(current_parts).strip()
-                                if stmt:
-                                    yield stmt
+                                stmt_text = "".join(current_parts).strip()
+                                if stmt_text:
+                                    yield Statement(
+                                        text=stmt_text,
+                                        statement_type=classify_statement(stmt_text),
+                                        start_line=stmt_start_line,
+                                        end_line=current_line,
+                                        offset=stmt_start_offset,
+                                        source_file=self.file_path
+                                    )
                                 current_parts = []
+                                stmt_start_line = -1
+                                stmt_start_offset = -1
                                 i += delim_len
                                 continue
                             else:
                                 current_parts.append(ch)
 
                     elif state == "SINGLE_QUOTE":
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
                         if ch == "\\":
                             current_parts.append(ch)
                             if i + 1 < n:
@@ -106,6 +151,9 @@ class SQLReader:
                             current_parts.append(ch)
 
                     elif state == "DOUBLE_QUOTE":
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
                         if ch == "\\":
                             current_parts.append(ch)
                             if i + 1 < n:
@@ -119,6 +167,9 @@ class SQLReader:
                             current_parts.append(ch)
 
                     elif state == "BACKTICK":
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
                         if ch == "\\":
                             current_parts.append(ch)
                             if i + 1 < n:
@@ -136,9 +187,23 @@ class SQLReader:
                             state = "DEFAULT"
                             i += 2
                             continue
-                        # 块注释字符直接忽略，不追加到语句中
+
+                    elif state == "MYSQL_VERSION_COMMENT":
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
+                        if ch == "*" and i + 1 < n and line[i + 1] == "/":
+                            state = "DEFAULT"
+                            current_parts.append("*/")
+                            i += 2
+                            continue
+                        else:
+                            current_parts.append(ch)
 
                     elif state == "DOLLAR_QUOTE":
+                        if not current_parts:
+                            stmt_start_line = current_line
+                            stmt_start_offset = char_offset
                         tag_full = f"${dollar_tag}$"
                         if line[i:].startswith(tag_full):
                             state = "DEFAULT"
@@ -150,7 +215,17 @@ class SQLReader:
 
                     i += 1
 
-        # 返回最后残余部分（如果文件末尾没有 delimiter 且仍有字符）
-        stmt = "".join(current_parts).strip()
-        if stmt:
-            yield stmt
+                # 累加行末物理偏移（包含换行符长度）
+                current_offset += len(line)
+
+        # 返回最后残余部分
+        stmt_text = "".join(current_parts).strip()
+        if stmt_text:
+            yield Statement(
+                text=stmt_text,
+                statement_type=classify_statement(stmt_text),
+                start_line=stmt_start_line if stmt_start_line != -1 else current_line,
+                end_line=current_line,
+                offset=stmt_start_offset if stmt_start_offset != -1 else current_offset,
+                source_file=self.file_path
+            )

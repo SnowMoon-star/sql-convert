@@ -1,0 +1,3 @@
+source_mode: "oracle"
+target_mode: "mysql"
+ignore_comments: true

@@ -16,7 +16,7 @@ from converter.capabilities import (
     CAP_TYPE_BIT, CAP_TYPE_BIT_LITERAL,
 )
 from converter.registry import register
-from sql_parser import TableBlock
+from model import TableBlock
 
 
 @register

@@ -1,6 +1,6 @@
 """方言基础类。"""
 from __future__ import annotations
-from sql_parser import TableBlock
+from model import TableBlock
 
 
 class BaseDialect:

@@ -6,7 +6,7 @@ from converter.capabilities import (
     CAP_DOUBLE_QUOTE, CAP_TYPE_AUTOINCREMENT, CAP_TYPE_BLOB,
 )
 from converter.registry import register
-from sql_parser import TableBlock
+from model import TableBlock
 
 
 @register

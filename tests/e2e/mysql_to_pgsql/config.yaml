@@ -1,0 +1,3 @@
+source_mode: "mysql"
+target_mode: "pgsql"
+ignore_comments: true

@@ -8,7 +8,7 @@ from converter.capabilities import (
     CAP_TYPE_ORACLE_DATE,
 )
 from converter.registry import register
-from sql_parser import TableBlock
+from model import TableBlock
 
 
 @register

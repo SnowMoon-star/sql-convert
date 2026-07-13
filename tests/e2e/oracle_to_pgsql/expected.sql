@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS "users" CASCADE;
+CREATE TABLE "users" (
+  "id" NUMERIC(10) PRIMARY KEY,
+  "username" VARCHAR(64)
+);

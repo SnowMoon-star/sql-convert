@@ -9,7 +9,7 @@ from converter.capabilities import (
     CAP_TYPE_EXTENSION, CAP_TYPE_PG_TYPE_CAST,
 )
 from converter.registry import register
-from sql_parser import TableBlock
+from model import TableBlock
 
 
 @register

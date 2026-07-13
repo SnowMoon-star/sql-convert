@@ -1,0 +1,3 @@
+source_mode: "sqlserver"
+target_mode: "pgsql"
+ignore_comments: true

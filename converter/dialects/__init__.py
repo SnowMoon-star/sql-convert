@@ -14,6 +14,7 @@ def ensure_registered() -> None:
     from converter.dialects.pgsql import PgsqlDialect        # noqa: F401
     from converter.dialects.sqlite import SqliteDialect      # noqa: F401
     from converter.dialects.oracle import OracleDialect      # noqa: F401
+    from converter.dialects.sqlserver import SqlServerDialect # noqa: F401
 
 
 __all__ = [
