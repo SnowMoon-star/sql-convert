@@ -1,0 +1,22 @@
+[project]
+name = "sql-convert"
+version = "1.0.0"
+description = "多方言 SQL 流式转换器"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "python-multipart>=0.0.6",
+    "croniter>=2.0.0",
+    "pycryptodome>=3.23.0",
+    "gmssl>=3.2.2",
+]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["web*", "core*", "utils*"]
+namespaces = false

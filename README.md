@@ -150,3 +150,144 @@ python main.py dump.sql --source-mode sqlserver --target-mode pgsql
 - `tests/`：
   - `test_*.py`：各单元测试。
   - `e2e/`：Golden File 集成校验测试，对 MySQL->PG、SQLServer->PG 等五种方言对进行自动验证。
+
+---
+
+## Web 管理界面
+
+项目内置基于 **FastAPI + Vue 3** 的全功能 Web 管理界面，提供可视化 SQL 转换、历史管理、系统监控和用户权限管理。
+
+### 启动 Web 服务
+
+```bash
+python -m web.server
+```
+
+默认监听 `http://127.0.0.1:8000`，首次启动自动初始化 SQLite 数据库和默认管理员账号。
+
+### 默认管理员账号
+
+| 字段 | 默认值 |
+|---|---|
+| 用户名 | `admin` |
+| 密码 | `admin` |
+
+> 首次登录后请在"系统设置"中修改密码。密码经加盐 SM3 哈希后存储。
+
+### 功能页面
+
+| 页面 | 说明 | 访问权限 |
+|---|---|---|
+| **仪表盘** | 系统资源监控（CPU/内存/磁盘）、转换统计数据折线图 | 所有用户 |
+| **转换工作台** | 在线编写或上传 SQL 文件，选择方言对进行转换，实时进度推送 | 所有用户 |
+| **转换历史** | 查看所有历史转换记录、详情、报告预览、下载转换结果 | 所有用户 |
+| **用户管理** | 创建/编辑/删除用户，解锁被封账号 | 仅管理员 |
+| **活跃用户** | 查看当前在线用户，强制下线 | 仅管理员 |
+| **审计日志** | 登录日志、操作日志、定时任务日志查询 | 仅管理员 |
+| **系统设置** | IP 白名单管理、用户/IP 封禁管理、运行参数查看 | 仅管理员 |
+
+### WebSocket 实时推送
+
+转换进度通过 WebSocket（`/api/ws`）实时推送，前端工作台页面可即时看到行级处理进度。
+
+---
+
+## API 接口
+
+所有 API 以 `/api` 为前缀。除 `POST /api/auth/login` 外均需鉴权（Cookie `session_token`）。
+
+### 认证
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/auth/login` | 用户登录 |
+| `POST` | `/api/auth/logout` | 退出登录 |
+| `GET` | `/api/me` | 获取当前用户信息 |
+
+### 转换任务
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/dialects` | 获取支持的方言列表 |
+| `POST` | `/api/convert` | 提交 SQL 转换任务（multipart 文件上传） |
+| `GET` | `/api/tasks` | 分页查询历史任务（支持文件名/状态/时间范围筛选） |
+| `GET` | `/api/tasks/{task_id}` | 获取任务详情 |
+| `GET` | `/api/download/{task_id}` | 下载转换后的 SQL 文件 |
+| `GET` | `/api/report/{task_id}` | 查看转换 HTML 报告 |
+| `GET` | `/api/stats` | 系统资源与任务统计数据 |
+| `GET` | `/api/stats/history` | 资源历史折线图数据 |
+| `WS` | `/api/ws` | WebSocket 实时进度推送 |
+
+### 用户管理（管理员）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/users` | 用户列表 |
+| `POST` | `/api/users` | 创建用户 |
+| `PUT` | `/api/users/{username}` | 更新用户 |
+| `DELETE` | `/api/users/{username}` | 删除用户 |
+| `POST` | `/api/users/{username}/unlock` | 解锁被封用户 |
+
+### 系统设置（管理员）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/whitelist` | IP 白名单列表 |
+| `POST` | `/api/whitelist` | 添加白名单 IP |
+| `DELETE` | `/api/whitelist/{ip}` | 删除白名单 IP |
+| `GET` | `/api/lockouts/users` | 用户封禁列表 |
+| `GET` | `/api/lockouts/ips` | IP 封禁列表 |
+| `DELETE` | `/api/lockouts/users/{username}` | 解封用户 |
+| `DELETE` | `/api/lockouts/ips/{ip}` | 解封 IP |
+| `GET` | `/api/active-users` | 活跃用户列表 |
+| `POST` | `/api/active-users/kick` | 强制下线用户 |
+| `GET` | `/api/logs/login` | 登录日志 |
+| `GET` | `/api/logs/operations` | 操作日志 |
+| `GET` | `/api/logs/timers` | 定时任务日志 |
+
+---
+
+## 配置文件
+
+复制 `config.template.yml` 为 `config.yml`，按需修改：
+
+```yaml
+web:
+  host: "127.0.0.1"
+  port: 8000
+  max_upload_size_mb: 500
+  secret_key: "change-me-to-a-secure-key"
+  max_workers: 4
+
+  auth:
+    enabled: true
+    username: "admin"
+    password: "admin"
+    session_expire: 7200
+
+  ip_whitelist:
+    enabled: true
+
+cleanup_scheduler:
+  task_history:
+    enabled: true
+    cron: "0 3 * * *"
+    retention_days: 30
+  login_log:
+    enabled: true
+    retention_days: 30
+  operation_log:
+    enabled: true
+    retention_days: 30
+```
+
+完整配置项见 `config.template.yml`。
+
+---
+
+## 数据库
+
+- **引擎**: SQLite，文件位于 `data/tasks.db`
+- **表结构**: 自动初始化，含 tasks / users / login_logs / operation_logs / timer_logs 等
+- **防篡改**: 每条任务记录使用 HMAC-SM3 签名校验数据完整性
+- **自动迁移**: 新增字段通过 `ALTER TABLE ADD COLUMN` 静默升级，无需手动操作

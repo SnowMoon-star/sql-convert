@@ -1,0 +1,8 @@
+# sql_convert 依赖配置文件 (CLI 与 Web UI 共享)
+pyyaml>=6.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-multipart>=0.0.6  # 支持网页端上传 SQL 文件表单
+croniter>=2.0.0  # 定时任务 cron 表达式解析
+pycryptodome>=3.23.0
+gmssl>=3.2.2

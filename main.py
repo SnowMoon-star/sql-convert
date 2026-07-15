@@ -268,13 +268,16 @@ def convert(input_path: Path, output_path: Path, source_mode: str, target_mode: 
     if report:
         report.start()
 
+    last_line = 0
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
 
         # 阶段 1: 流式读取、翻译规则运行、分类分流
         for raw_stmt in reader.iter_statements():
+            last_line = raw_stmt.end_line
             # 1. 兼容性特性检索矩阵检验
             if report:
+                report.notify_progress(last_line, status="PROCESSING")
                 check_compatibility(raw_stmt.text, report)
 
             logger.trace(f"Processing stmt (Line {raw_stmt.start_line}): {raw_stmt.text[:50]}...")
@@ -458,6 +461,7 @@ def convert(input_path: Path, output_path: Path, source_mode: str, target_mode: 
             os.rename(temp_sql_path, output_path)
 
     if report:
+        report.notify_progress(last_line, status="SUCCESS")
         report.stop()
 
     return counters

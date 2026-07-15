@@ -10,19 +10,15 @@ class StatementType(Enum):
     INDEX = auto()
     UNKNOWN = auto()
 
-# 用于清理前导注释和空白字符的正则
-_LEADING_COMMENT_PAT = re.compile(
-    r"^(\s+|(--[^\n]*\n?)|(#[^\n]*\n?)|(/\*.*?\*/))",
+# 一次性匹配并剥离所有前导注释/空白的正则（使用 + 量词替代外层循环，避免 O(n²) DoS）
+_LEADING_COMMENTS_PAT = re.compile(
+    r"^(?:\s+|--[^\n]*\n?|#[^\n]*\n?|/\*.*?\*/)+",
     re.DOTALL | re.IGNORECASE
 )
 
 def _clean_for_classification(sql: str) -> str:
-    """循环剥离 SQL 开头的所有空白和注释，获取干净的起始文本。"""
-    last_len = -1
-    while len(sql) != last_len:
-        last_len = len(sql)
-        sql = _LEADING_COMMENT_PAT.sub("", sql)
-    return sql.strip()
+    """单次剥离 SQL 开头的所有空白和注释块，获取干净的起始文本。"""
+    return _LEADING_COMMENTS_PAT.sub("", sql).strip()
 
 def classify_statement(sql: str) -> StatementType:
     """对 SQL 语句进行分类。"""

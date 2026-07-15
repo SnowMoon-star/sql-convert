@@ -19,9 +19,30 @@ class ConversionReport:
     rule_hits: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     failed_statements: list[dict] = field(default_factory=list)  # {"sql": str, "error": str}
+    
+    # 异步/多线程 Web 回调支持
+    progress_callback: Any = None
+    _last_notified_line: int = 0
+
+    def notify_progress(self, current_line: int, status: str = "PROCESSING"):
+        """推流进度通知到绑定的回调接口（限制推送频率）。"""
+        if self.progress_callback:
+            # 状态变更、首行或行数增加 500 时推送以节省 I/O 资源
+            if status != "PROCESSING" or current_line - self._last_notified_line >= 500 or self._last_notified_line == 0:
+                self._last_notified_line = current_line
+                self.progress_callback({
+                    "status": status,
+                    "current_line": current_line,
+                    "table_count": self.table_count,
+                    "index_count": self.index_count,
+                    "constraint_count": self.constraint_count,
+                    "warning_count": len(self.warnings),
+                    "failure_count": len(self.failed_statements),
+                })
 
     def start(self):
         self.start_time = time.perf_counter()
+
 
     def stop(self):
         self.end_time = time.perf_counter()
@@ -81,18 +102,22 @@ class ConversionReport:
         else:
             rule_rows_html = "<tr><td colspan='2' class='text-center text-muted'>无规则匹配次数统计</td></tr>"
 
-        # 告警 HTML
+        # 告警 HTML（对告警文本进行 HTML 转义，防止 XSS 注入）
         warnings_html = ""
         if self.warnings:
+            import html as _html
             for i, warn in enumerate(self.warnings):
+                warn_escaped = _html.escape(warn)
+                warn_body = warn_escaped.split(']', 1)[1].strip() if ']' in warn_escaped else warn_escaped
+                warn_level = warn_escaped.split(']', 1)[0].replace('[', '') if '[' in warn_escaped else '警告'
                 warnings_html += f"""
                 <div class="accordion-item">
                     <button class="accordion-header" onclick="toggleAccordion('warn-{i}')">
-                        <span class="badge badge-warning">告警</span> {warn.split(']', 1)[1].strip() if ']' in warn else warn}
+                        <span class="badge badge-warning">告警</span> {warn_body}
                     </button>
                     <div id="warn-{i}" class="accordion-content">
                         <div class="content-inner">
-                            <strong>告警级别：</strong> {warn.split(']', 1)[0].replace('[', '') if '[' in warn else '警告'}<br/>
+                            <strong>告警级别：</strong> {warn_level}<br/>
                             <strong>提示：</strong> 请仔细核对目标库的语法支持情况，必要时手工微调转换后的 SQL。
                         </div>
                     </div>
@@ -108,14 +133,17 @@ class ConversionReport:
             </div>
             """
 
-        # 失败语句 HTML
+        # 失败语句 HTML（对 SQL 原文及错误信息进行 HTML 转义，防止 XSS 注入）
         failures_html = ""
         if self.failed_statements:
+            import html as _html
             for i, fail in enumerate(self.failed_statements):
                 sql_snippet = fail['sql']
                 if len(sql_snippet) > 200:
                     sql_snippet = sql_snippet[:200] + "\n... (语句过长已截断) ..."
-                
+                sql_snippet_escaped = _html.escape(sql_snippet)
+                error_escaped = _html.escape(fail['error'])
+
                 failures_html += f"""
                 <div class="accordion-item error-item">
                     <button class="accordion-header" onclick="toggleAccordion('fail-{i}')">
@@ -123,8 +151,8 @@ class ConversionReport:
                     </button>
                     <div id="fail-{i}" class="accordion-content">
                         <div class="content-inner">
-                            <div class="error-msg"><strong>异常描述：</strong> {fail['error']}</div>
-                            <pre class="code-block"><code>{sql_snippet}</code></pre>
+                            <div class="error-msg"><strong>异常描述：</strong> {error_escaped}</div>
+                            <pre class="code-block"><code>{sql_snippet_escaped}</code></pre>
                         </div>
                     </div>
                 </div>
@@ -702,15 +730,14 @@ class ConversionReport:
         return "\n".join(lines)
 
     def write_report(self, output_path: str | Path, source_mode: str, target_mode: str) -> Path:
-        """根据输出路径生成带精确时间戳的 HTML 报告文件：<输出主名>_yyyyMMddHHmmss_report.html。"""
+        """根据输出路径生成匹配的 HTML 报告文件：<输出主名>_report.html。"""
         out_p = Path(output_path)
-        timestamp = time.strftime('%Y%m%d%H%M%S')
         
         # 确保目录存在
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
         # 写出 HTML
-        report_name = f"{out_p.stem}_{timestamp}_report.html"
+        report_name = f"{out_p.stem}_report.html"
         report_path = out_p.with_name(report_name)
         report_path.write_text(self.generate_html(source_mode, target_mode), encoding="utf-8")
 

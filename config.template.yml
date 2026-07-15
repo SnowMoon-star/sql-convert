@@ -1,0 +1,68 @@
+# sql_convert 全局配置文件模板
+# 复制此文件并重命名为 config.yml 进行自定义配置
+
+# 转换引擎配置
+converter:
+  continue_on_error: false
+  encoding: "utf-8"
+  batch_size: 1000          # DML 导入时的流式分批写入行数限制
+
+# 全局日志配置
+logger:
+  level: "INFO"                  # 最低日志级别：TRACE, DEBUG, INFO, WARN, ERROR
+  file_path: "data/logs/sql_convert.log" # 日志输出的物理文件路径
+  max_bytes: 10485760            # 单个日志文件的体积上限 (10MB)
+  backup_count: 7                # 保留的最大历史日志滚动备份天数 (7天)
+
+# Web UI 与 API 服务配置
+web:
+  host: "127.0.0.1"
+  port: 8000
+  max_upload_size_mb: 500   # 网页端最大允许上传的 SQL 文件体积 (MB)
+  secret_key: "change-me-to-a-secure-key" # 用于数据库 HMAC 防篡改校验的秘钥（如空则随机生成）
+  history_retention_days: 30 # 历史记录与文件的物理保留天数
+  max_workers: 4            # 转换任务的线程池最大并发限制数
+
+  # IP 白名单安全校验
+  ip_whitelist:
+    enabled: true          # 是否开启 IP 白名单网络层拦截机制
+
+  # 登录认证配置
+  auth:
+    enabled: true           # 是否启用用户登录验证拦截
+    username: "admin"       # 首次初始化播种时的默认管理员账号
+    password: "admin"       # 首次初始化播种时的默认管理员密码，入库后自动执行加盐哈希加密
+    allow_multi_login: false # 是否允许多地登录同一账号。若设为 false，新登录将挤退旧登录。
+    session_expire: 7200  # Session Token 的滑动过期时长（秒）。每次 API 调用均会自动续期。默认 7200秒 = 2小时。
+
+# 定时物理清理服务配置（每个子任务独立配置 cron 表达式和保留策略）
+cleanup_scheduler:
+  task_history:
+    enabled: true               # 是否开启历史转换任务清理
+    cron: "0 3 * * *"          # 每日凌晨3点执行
+    retention_days: 30          # 任务记录保留天数（超出将被物理删除）
+  timer_log:
+    enabled: true               # 是否开启定时任务日志清理
+    cron: "0 3 * * *"          # 每日凌晨3点执行
+    retention_days: 7           # 定时任务日志保留天数（超出将被物理删除）
+  login_log:
+    enabled: true               # 是否开启登录日志清理
+    cron: "0 3 * * *"          # 每日凌晨3点执行
+    retention_days: 30          # 登录日志保留天数（超出将被物理删除）
+  operation_log:
+    enabled: true               # 是否开启操作日志清理
+    cron: "0 3 * * *"          # 每日凌晨3点执行
+    retention_days: 30          # 操作日志保留天数（超出将被物理删除）
+  activate_user:
+    enabled: true               # 是否开启清理过期活跃用户会话
+    cron: "* * * * *"          # 每分钟执行一次，清理过期的 Session 记录
+  auto_unlock:
+    enabled: true               # 是否开启被锁用户自动解锁
+    cron: "* * * * *"          # 每分钟执行一次，自动解锁已过锁定期的用户
+
+# 方言特定输出策略
+dialects:
+  mysql:
+    default_engine: "InnoDB"
+  pgsql:
+    drop_cascade: true      # PG 目标库下，删除表是否默认带 CASCADE

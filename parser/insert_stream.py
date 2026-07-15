@@ -31,13 +31,14 @@ def _parse_value_row(row_str: str) -> InsertRow:
     while i < n:
         ch = row_str[i]
 
-        if ch == "\\" and in_single:
-            # 转义符号：如 \'，将其作为原始文本追加并跳过下一个字符
-            current.append(ch)
-            if i + 1 < n:
-                current.append(row_str[i + 1])
-                i += 2
-                continue
+        if ch == "\\":
+            if in_single or in_double:
+                # 转义符号（如 \' 或 \"）：将其原样追加并跳过下一个字符，防止引号状态机误翻转
+                current.append(ch)
+                if i + 1 < n:
+                    current.append(row_str[i + 1])
+                    i += 2
+                    continue
 
         if ch == "'" and not in_double:
             in_single = not in_single

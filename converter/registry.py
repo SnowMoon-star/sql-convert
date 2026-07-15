@@ -38,6 +38,13 @@ def get_dialect(mode: str, database: str | None = None) -> BaseDialect:
     return _REGISTRY[key](database)
 
 
+def get_supported_dialects() -> list[str]:
+    """获取所有已加载并注册的支持方言。"""
+    _ensure_loaded()
+    return sorted(list(_REGISTRY.keys()))
+
+
+
 # 别名
 register_alias("pgsql", "pgsql")
 register_alias("postgresql", "pgsql")

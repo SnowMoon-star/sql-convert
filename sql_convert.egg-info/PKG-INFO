@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: sql-convert
+Version: 1.0.0
+Summary: 多方言 SQL 流式转换器
+Requires-Python: >=3.10
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: fastapi>=0.100.0
+Requires-Dist: uvicorn[standard]>=0.20.0
+Requires-Dist: python-multipart>=0.0.6
+Requires-Dist: croniter>=2.0.0
+Requires-Dist: pycryptodome>=3.23.0
+Requires-Dist: gmssl>=3.2.2
