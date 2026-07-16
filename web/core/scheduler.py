@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 import uuid
-from typing import Any, Callable, Dict, Set
+from typing import Any, Callable, Dict
 
 from main import convert
 from utils.report import ConversionReport
@@ -46,8 +46,8 @@ class TaskScheduler:
         max_workers = config.get("web.max_workers", 4)
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sql-conv-worker")
         
-        # 活跃的 WebSocket 消息队列集合 (用于线程安全消息广播)
-        self.ws_queues: Set[asyncio.Queue] = set()
+        # 活跃的 WebSocket 消息队列字典 (key=username, 值为该用户的监听 Queue 集合，以支持多标签页/多端并发登录)
+        self.ws_queues: Dict[str, set[asyncio.Queue]] = {}
 
     @property
     def tasks(self) -> dict[str, TaskInfo]:
@@ -101,16 +101,43 @@ class TaskScheduler:
             loop
         )
 
-    def register_ws_queue(self, queue: asyncio.Queue) -> None:
-        """注册 WebSocket 监听队列。"""
-        self.ws_queues.add(queue)
+    def register_ws_queue(self, username: str, queue: asyncio.Queue) -> None:
+        """注册 WebSocket 监听队列，以 username 为 key，支持一个用户对应多个监听队列。"""
+        if username not in self.ws_queues:
+            self.ws_queues[username] = set()
+        self.ws_queues[username].add(queue)
 
-    def unregister_ws_queue(self, queue: asyncio.Queue) -> None:
-        """注销 WebSocket 监听队列。"""
-        self.ws_queues.discard(queue)
+    def unregister_ws_queue(self, username: str, queue: asyncio.Queue) -> None:
+        """注销特定的 WebSocket 监听队列（精确比对实例，防止并发冲突）。"""
+        if username in self.ws_queues:
+            self.ws_queues[username].discard(queue)
+            if not self.ws_queues[username]:
+                self.ws_queues.pop(username, None)
+
+    def shutdown_all_ws(self) -> None:
+        """服务关闭时释放所有 WebSocket 连接并清空字典。"""
+        for queues in self.ws_queues.values():
+            for q in queues:
+                q.put_nowait(None)  # 给每个队列发退出信号
+        self.ws_queues.clear()
+
+    def _broadcast_to_recipients(self, username: str, message: dict, loop: asyncio.AbstractEventLoop) -> None:
+        """安全地向指定用户的所有活跃连接以及 admin 广播消息。"""
+        if not self.ws_queues:
+            return
+        recipients = set()
+        # 1. 广播给任务创建者
+        if username in self.ws_queues:
+            recipients.update(self.ws_queues[username])
+        # 2. 广播给所有 active 的 admin 用户
+        if "admin" in self.ws_queues:
+            recipients.update(self.ws_queues["admin"])
+
+        for q in recipients:
+            loop.call_soon_threadsafe(q.put_nowait, message)
 
     def _broadcast(self, task: TaskInfo, loop: asyncio.AbstractEventLoop | None = None) -> None:
-        """向所有监听的 WebSocket 连接广播任务进度状态。"""
+        """向任务所属用户及 admin 广播任务进度状态。"""
         if not self.ws_queues:
             return
         message = {
@@ -125,11 +152,18 @@ class TaskScheduler:
             "output_file": task.output_file,
             "report_html": task.report_html
         }
+        
+        recipients = set()
+        if task.username in self.ws_queues:
+            recipients.update(self.ws_queues[task.username])
+        if "admin" in self.ws_queues:
+            recipients.update(self.ws_queues["admin"])
+
         if loop and loop.is_running():
-            for q in self.ws_queues:
+            for q in recipients:
                 loop.call_soon_threadsafe(q.put_nowait, message)
         else:
-            for q in self.ws_queues:
+            for q in recipients:
                 q.put_nowait(message)
 
     # ── 定义可执行的操作名称列表 ──
@@ -377,15 +411,14 @@ class TaskScheduler:
             task.progress.update(progress_data)
             db.save_task(task)
             
-            # 使用 threadsafe 推送给主事件循环中的所有 WS 队列
+            # 使用安全隔离路由推送给对应的 WS 队列
             message = {
                 "type": "progress",
                 "task_id": task_id,
                 "status": progress_data.get("status", "PROCESSING"),
                 "progress": task.progress
             }
-            for q in self.ws_queues:
-                loop.call_soon_threadsafe(q.put_nowait, message)
+            self._broadcast_to_recipients(task.username, message, loop)
 
         report = ConversionReport()
         report.progress_callback = progress_callback
@@ -423,7 +456,7 @@ class TaskScheduler:
             db.save_task(task)
             get_logger().info(f"[Worker] 任务 {task_id} 转换成功完成！输出: {task.output_file}")
 
-            # 推送成功消息
+            # 精确路由推送成功消息
             message = {
                 "type": "status_change",
                 "task_id": task_id,
@@ -435,8 +468,7 @@ class TaskScheduler:
                 "output_file": task.output_file,
                 "report_html": task.report_html
             }
-            for q in self.ws_queues:
-                loop.call_soon_threadsafe(q.put_nowait, message)
+            self._broadcast_to_recipients(task.username, message, loop)
 
         except Exception as e:
             from web.core.db_base import _now_cst
@@ -450,7 +482,7 @@ class TaskScheduler:
             db.save_task(task)
             get_logger().error(f"[Worker] 任务 {task_id} 执行遇到异常崩溃: {e}", exc_info=True)
             
-            # 推送失败消息
+            # 精确路由推送失败消息
             message = {
                 "type": "status_change",
                 "task_id": task_id,
@@ -461,8 +493,7 @@ class TaskScheduler:
                 "progress": task.progress,
                 "error": task.error
             }
-            for q in self.ws_queues:
-                loop.call_soon_threadsafe(q.put_nowait, message)
+            self._broadcast_to_recipients(task.username, message, loop)
 
 
 # 全局单例调度器

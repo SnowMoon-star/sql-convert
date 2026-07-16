@@ -15,6 +15,9 @@ _DEFAULT_CONFIG = {
         "host": "127.0.0.1",
         "port": 8000,
         "max_upload_size_mb": 500,
+        "websocket": {
+            "max_reconnect_attempts": 5,
+        },
     },
     "dialects": {
         "mysql": {

@@ -69,12 +69,16 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # 优雅退出：取消清理协程
+    # 优雅退出：取消清理协程 + 释放所有 WebSocket 连接
     cleanup_task.cancel()
     try:
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # 关闭所有 WebSocket 连接并清空队列字典
+    scheduler.shutdown_all_ws()
+    get_logger().info("[Server] 服务关闭，已释放所有 WebSocket 连接。")
 
 
 app = FastAPI(

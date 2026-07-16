@@ -245,7 +245,7 @@ onMounted(() => {
           </div>
           
           <div class="w-[140px] shrink-0 font-mono text-sm text-center" style="color: var(--text-primary)">
-            {{ task.updated_at && task.updated_at !== task.created_at ? formatTime(task.updated_at) : '—' }}
+            {{ task.completed_at ? formatTime(task.completed_at) : '—' }}
           </div>
           
           <div class="w-[95px] shrink-0 flex items-center justify-end gap-1">

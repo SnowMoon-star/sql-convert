@@ -12,7 +12,6 @@ const authStore = useAuthStore();
 
 const username = ref('');
 const password = ref('');
-const rememberMe = ref(true);
 const loading = ref(false);
 
 const handleLogin = async () => {
@@ -27,7 +26,7 @@ const handleLogin = async () => {
       password: password.value,
     });
     if (res.status === 'success') {
-      authStore.setToken(res.token, res.username, rememberMe.value);
+      authStore.setToken(res.token, res.username);
       message.success('登录成功，欢迎回来！');
       router.push('/workspace');
     } else {
@@ -95,18 +94,7 @@ const handleLogin = async () => {
           </div>
         </div>
 
-        <!-- 记住密码与辅助 -->
-        <div class="flex items-center justify-between text-xs py-1">
-          <label class="flex items-center space-x-2 cursor-pointer select-none" style="color: var(--text-secondary)">
-            <input 
-              v-model="rememberMe"
-              type="checkbox" 
-              class="rounded text-indigo-600 focus:ring-indigo-500/40 w-3.5 h-3.5 accent-indigo-500"
-              :style="{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }"
-            />
-            <span>记住此设备</span>
-          </label>
-        </div>
+
 
         <!-- 登录按钮 -->
         <button

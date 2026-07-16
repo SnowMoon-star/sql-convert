@@ -23,6 +23,10 @@ web:
   history_retention_days: 30 # 历史记录与文件的物理保留天数
   max_workers: 4            # 转换任务的线程池最大并发限制数
 
+  # WebSocket 实时推送配置
+  websocket:
+    max_reconnect_attempts: 5   # 前端 WebSocket 断线后最大自动重连次数（路由跳转重新进入将重置）
+
   # IP 白名单安全校验
   ip_whitelist:
     enabled: true          # 是否开启 IP 白名单网络层拦截机制

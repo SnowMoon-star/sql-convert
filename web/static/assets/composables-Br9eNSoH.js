@@ -1,0 +1,1 @@
+import{O as e}from"./request-BQhxbqbR.js";import{a as t}from"./use-message-DKxoS41w.js";import{c as n}from"./index-DUVLM3jR.js";function r(){let r=e(n,null);return r===null&&t(`use-dialog`,`No outer <n-dialog-provider /> founded.`),r}export{r as t};

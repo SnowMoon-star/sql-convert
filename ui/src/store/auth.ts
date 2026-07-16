@@ -1,17 +1,9 @@
 import { defineStore } from 'pinia';
 
-function getCookie(name: string): string {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) {
-    return parts.pop()?.split(';').shift() || '';
-  }
-  return '';
-}
-
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: sessionStorage.getItem('session_token') || localStorage.getItem('session_token') || getCookie('session_token_js') || '',
+    // 统一变更为 localStorage，废弃 sessionStorage
+    token: localStorage.getItem('session_token') || '',
     username: localStorage.getItem('username') || '',
     isAdmin: localStorage.getItem('is_admin') === 'true',
     avatar: localStorage.getItem('avatar') || '',
@@ -20,17 +12,12 @@ export const useAuthStore = defineStore('auth', {
     isLoggedIn: (state) => !!state.token,
   },
   actions: {
-    setToken(token: string, username: string, remember: boolean = true) {
+    setToken(token: string, username: string) {
       this.token = token;
       this.username = username;
-      sessionStorage.setItem('session_token', token);
-      if (remember) {
-        localStorage.setItem('session_token', token);
-        localStorage.setItem('username', username);
-      } else {
-        localStorage.removeItem('session_token');
-        localStorage.removeItem('username');
-      }
+      // 统一持久化存入 localStorage
+      localStorage.setItem('session_token', token);
+      localStorage.setItem('username', username);
     },
     setAvatar(avatar: string) {
       this.avatar = avatar;
@@ -41,7 +28,6 @@ export const useAuthStore = defineStore('auth', {
       this.username = '';
       this.isAdmin = false;
       this.avatar = '';
-      sessionStorage.removeItem('session_token');
       localStorage.removeItem('session_token');
       localStorage.removeItem('username');
       localStorage.removeItem('is_admin');

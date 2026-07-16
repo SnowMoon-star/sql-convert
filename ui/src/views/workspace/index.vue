@@ -4,8 +4,10 @@ import { useMessage, NUpload } from 'naive-ui';
 import { Icon } from '@iconify/vue';
 import request from '../../utils/request';
 import MonacoEditor from '../../components/MonacoEditor.vue';
+import { useAuthStore } from '../../store/auth';
 
 const message = useMessage();
+const authStore = useAuthStore();
 
 // SQL 语句校验
 const validateSql = (sql: string): string | null => {
@@ -66,6 +68,10 @@ const converting = ref(false);
 // WebSocket 引用
 let ws: WebSocket | null = null;
 let pollTimer: any = null;
+let wsReconnectAttempts = 0;
+let wsMaxReconnect = 5;
+// WebSocket 连接状态指示: 'connecting' | 'connected' | 'disconnected'
+const wsStatus = ref<'connecting' | 'connected' | 'disconnected'>('disconnected');
 
 const startPolling = (taskId: string) => {
   if (pollTimer) clearInterval(pollTimer);
@@ -123,13 +129,28 @@ const stopPolling = () => {
 
 const initWebSocket = () => {
   try {
+    wsStatus.value = 'connecting';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+    const token = localStorage.getItem('session_token') || '';
+    // 将 Token 显式拼接至 Query 参数中，绕过对 HttpOnly Cookie 自动传递的依赖
+    const wsUrl = `${protocol}//${window.location.host}/api/ws?token=${encodeURIComponent(token)}`;
     ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      wsStatus.value = 'connected';
+      wsReconnectAttempts = 0;  // 成功建立连接后重置重连计数
+      logs.value.push(`[${new Date().toLocaleTimeString()}] 🟢 WebSocket 连接成功。`);
+      if (converting.value && activeTaskId.value) {
+        // 重连成功，若任务正在进行，立即注销 Polling，无缝切回 WebSocket 推送通道
+        stopPolling();
+        logs.value.push(`[${new Date().toLocaleTimeString()}] 🔄 已自动将监听通道切回 WebSocket 实时进度推送模式。`);
+      }
+    };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'ping') return; // 拦截并忽略心跳探测包
         if (data.task_id === activeTaskId.value) {
           if (data.progress) {
             const step = data.progress.step || '';
@@ -165,11 +186,39 @@ const initWebSocket = () => {
       }
     };
 
-    ws.onclose = () => {
-      setTimeout(initWebSocket, 3000);
+    ws.onclose = (event) => {
+      wsStatus.value = 'disconnected';
+
+      // 4001: 认证失效 (Token 错误)，4003: IP 被封禁。此两类情况不进行无谓重连，直接终止循环
+      if (event.code === 4001 || event.code === 4003) {
+        logs.value.push(`[${new Date().toLocaleTimeString()}] 🔴 WebSocket 连接请求被服务端拒绝 (握手失效, 错误码: ${event.code})。`);
+        if (event.code === 4001) {
+          message.error("登录凭证已失效，请重新登录。");
+          authStore.clearToken();
+          window.location.href = '#/login';
+        } else if (event.code === 4003) {
+          message.error("访问受限：您的 IP 已被封禁或不在白名单内。");
+        }
+        return;
+      }
+
+      wsReconnectAttempts++;
+      if (wsReconnectAttempts < wsMaxReconnect) {
+        logs.value.push(`[${new Date().toLocaleTimeString()}] 🟡 WebSocket 连接已断开，正在尝试第 ${wsReconnectAttempts} 次重连...`);
+        setTimeout(initWebSocket, 3000);
+      } else {
+        logs.value.push(`[${new Date().toLocaleTimeString()}] ❌ WebSocket 重连尝试已达上限，已彻底放弃重连。`);
+      }
+      // WebSocket 断开期间，若任务仍在转换中，启动 Polling 轮询保底以防接收不到进度
+      if (converting.value && activeTaskId.value) {
+        if (!pollTimer) {
+          logs.value.push(`[${new Date().toLocaleTimeString()}] ⚠️ 进度监听通道已自动无缝降级为 Polling 短轮询模式。`);
+          startPolling(activeTaskId.value);
+        }
+      }
     };
   } catch {
-    // 连接错误，静默重试
+    wsStatus.value = 'disconnected';
   }
 };
 
@@ -216,8 +265,13 @@ const handleConvert = async () => {
         converting.value = false;
         fetchConvertedResult(res.task_id);
       } else {
-        logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，等待执行...`);
-        startPolling(res.task_id);
+        // 优先使用 WebSocket，若不可用则触发轮询
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，正在通过 WebSocket 实时监听进度...`);
+        } else {
+          logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，通过 Polling 轮询监听进度...`);
+          startPolling(res.task_id);
+        }
       }
     } else {
       converting.value = false;
@@ -259,8 +313,13 @@ const handleFileUpload = async (options: any) => {
         converting.value = false;
         fetchConvertedResult(res.task_id);
       } else {
-        logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，等待执行...`);
-        startPolling(res.task_id);
+        // 优先使用 WebSocket，若不可用则触发轮询
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，正在通过 WebSocket 实时监听进度...`);
+        } else {
+          logs.value.push(`[${new Date().toLocaleTimeString()}] 任务已入队，通过 Polling 轮询监听进度...`);
+          startPolling(res.task_id);
+        }
       }
     } else {
       converting.value = false;
@@ -310,6 +369,15 @@ const parseLog = (log: string) => {
 };
 
 onMounted(async () => {
+  // 获取 WebSocket 重连配置
+  try {
+    const wsConfig: any = await request.get('/api/ws-config');
+    if (wsConfig && wsConfig.max_reconnect_attempts) {
+      wsMaxReconnect = wsConfig.max_reconnect_attempts;
+    }
+  } catch {
+    // 使用默认值 5
+  }
   initWebSocket();
   try {
     const res = await request.get('/api/dialects');
@@ -452,9 +520,21 @@ onUnmounted(() => {
 
     <!-- 底部：执行日志 -->
     <div class="flex flex-col gap-2 h-[180px] shrink-0">
-      <div class="flex items-center gap-2 px-1">
-        <Icon icon="material-symbols:terminal" class="w-3.5 h-3.5" style="color: var(--text-muted)" />
-        <span class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--text-muted)">执行日志</span>
+      <div class="flex items-center gap-2 px-1 w-full justify-between">
+        <div class="flex items-center gap-2">
+          <Icon icon="material-symbols:terminal" class="w-3.5 h-3.5" style="color: var(--text-muted)" />
+          <span class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--text-muted)">执行日志</span>
+        </div>
+        <!-- WebSocket 状态微缩呼吸灯指示器 -->
+        <span class="flex items-center gap-1.5 text-[10px] select-none shrink-0" style="color: var(--text-muted)">
+          <span class="w-2 h-2 rounded-full transition-all duration-300" :style="{
+            background: wsStatus === 'connected' ? '#10b981' : wsStatus === 'connecting' ? '#f59e0b' : '#ef4444',
+            boxShadow: wsStatus === 'connected' ? '0 0 6px #10b981' : wsStatus === 'connecting' ? '0 0 6px #f59e0b' : 'none'
+          }" :class="{ 'animate-pulse': wsStatus === 'connected', 'animate-bounce': wsStatus === 'connecting' }"></span>
+          <span>
+            {{ wsStatus === 'connected' ? 'WebSocket 已联通' : wsStatus === 'connecting' ? 'WebSocket 连接中...' : 'WebSocket 断开 (轮询保底)' }}
+          </span>
+        </span>
       </div>
       <div class="flex-1 rounded-xl p-4 overflow-y-auto font-mono text-xs leading-relaxed space-y-1.5 border"
            :style="{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }">

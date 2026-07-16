@@ -477,12 +477,25 @@ async def get_stats_history(current_user: str = Depends(verify_auth)):
     return {"history": list(_resource_history)}
 
 
+@router.get("/ws-config")
+async def get_ws_config(current_user: str = Depends(verify_auth)):
+    """返回 WebSocket 前端配置（重连策略等）。"""
+    return {
+        "max_reconnect_attempts": config.get("web.websocket.max_reconnect_attempts", 5)
+    }
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket 接口，提供实时进度流式广播订阅（内部防越权握手）。"""
+    # 必须首先 accept 握手连接，避免 ASGI 容器因未完成握手便终止而输出 ERROR 日志，
+    # 并且能为前端提供准确的 close code（如 4001, 4003）以控制其断开后不再盲目重连。
     await websocket.accept()
     
     client_ip = websocket.client.host
+    token = None
+    authenticated_user = None
+    queue = None
 
     # 1. 验证 IP 黑名单
     fail_count_ip, lock_time_ip, is_perm_lock_ip = db.get_ip_attempts(client_ip)
@@ -503,18 +516,22 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=4003)
             return
 
-    # 3. 验证登录 Token
+    # 3. 验证登录 Token (支持 Query param 中显式传入的 token，降级使用 Cookie)
+    token = websocket.query_params.get("token") or websocket.cookies.get("session_token")
+    if token:
+        authenticated_user = db.get_username_by_session(token)
+
     if config.get("web.auth.enabled", True):
-        token = websocket.cookies.get("session_token")
-        authenticated_user = db.get_username_by_session(token) if token else None
         if not authenticated_user:
             await websocket.close(code=4001)
             return
+    else:
+        # 当禁用认证时，默认指定为 anonymous 用户，防止局部变量未定义异常
+        authenticated_user = authenticated_user or "anonymous"
+    get_logger().info(f"[WS] 客户端 WebSocket 通道已建立 (用户: {authenticated_user})。")
 
-    get_logger().info("[WS] 客户端 WebSocket 通道已建立。")
-    
-    queue: asyncio.Queue = asyncio.Queue()
-    scheduler.register_ws_queue(queue)
+    queue = asyncio.Queue()
+    scheduler.register_ws_queue(authenticated_user, queue)
 
     try:
         initial_tasks = []
@@ -540,10 +557,29 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_json(initial_msg)
 
         while True:
-            msg = await queue.get()
-            await websocket.send_json(msg)
-            queue.task_done()
+            try:
+                # 设定 30 秒等待超时。既能防止 Nginx 60秒默认读写超时强断连接，又能在闲置无任务时进行链路探测
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                if msg is None:  # 服务关闭或收到显式断开信号时退出
+                    break
+                await websocket.send_json(msg)
+                queue.task_done()
+            except asyncio.TimeoutError:
+                # 超时说明当前无进行中的任务广播，主动发送 ping 以检测客户端是否存活（防止静默断网造成残留协程内存泄漏）
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    # 发送失败表示底层 TCP 已断开，向上抛出以触发 finally 回收
+                    raise
     except WebSocketDisconnect:
-        get_logger().info("[WS] 客户端 WebSocket 主动断开连接。")
+        get_logger().info(f"[WS] 客户端 WebSocket 主动断开连接 (用户: {authenticated_user})。")
+    except (ConnectionResetError, RuntimeError, OSError) as e:
+        # 捕捉常规网络重置与 ASGI 断开异常，净化日志，防止打印大段崩溃堆栈
+        get_logger().info(f"[WS] 客户端 WebSocket 连接重置或异常关闭 (用户: {authenticated_user})。")
+    except asyncio.CancelledError:
+        # 服务关闭时 asyncio 取消所有任务，静默回收连接资源
+        get_logger().info(f"[WS] 服务关闭，WebSocket 连接已回收 (用户: {authenticated_user})。")
     finally:
-        scheduler.unregister_ws_queue(queue)
+        if authenticated_user and queue:
+            # 精确传入当前特定的 Queue 实例，避免多标签页退出时错误注销其他标签页的推送队列
+            scheduler.unregister_ws_queue(authenticated_user, queue)
